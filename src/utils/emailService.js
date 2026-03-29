@@ -11,22 +11,28 @@ const getTransporter = () => {
     return null;
   }
 
-  // ✅ Use `service: "gmail"` — Nodemailer resolves Gmail SMTP with
-  // IPv4-only internally, bypassing Render's broken IPv6 routing.
-  // Do NOT use host/port manually — that's what causes ENETUNREACH.
   transporter = nodemailer.createTransport({
-    service: "gmail",
+    service: "gmail", // works on both local & Render (IPv4-safe)
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // App Password (not Gmail login password)
+      pass: process.env.EMAIL_PASS, // 16-char App Password
     },
-    pool: true, // reuse connections — avoids repeated handshake timeouts
+    pool: true,
     maxConnections: 3,
     rateDelta: 1000,
     rateLimit: 3,
   });
 
-  console.log("📧 Gmail transporter ready (service mode)");
+  // Verify on startup so you know immediately if creds are wrong
+  transporter.verify((err) => {
+    if (err) {
+      console.error("❌ Email verify failed:", err.message);
+      transporter = null; // reset so next call retries
+    } else {
+      console.log("📧 Gmail transporter verified & ready");
+    }
+  });
+
   return transporter;
 };
 
@@ -44,9 +50,8 @@ const sendEmail = async (to, subject, html) => {
     };
 
   try {
-    console.log(`📧 Sending email to: ${to}`);
+    console.log(`📧 Sending to: ${to}`);
     const info = await t.sendMail({
-      // ✅ from address MUST be the authenticated Gmail account
       from: `"Beeyond Harvest 🌾" <${process.env.EMAIL_USER}>`,
       to,
       subject,
@@ -55,8 +60,12 @@ const sendEmail = async (to, subject, html) => {
     console.log(`✅ Email sent to ${to}: ${info.messageId}`);
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error(`❌ Email failed to ${to}:`, error.message);
-    console.error("Code:", error.code);
+    console.error(
+      `❌ Email failed to ${to}:`,
+      error.message,
+      "| Code:",
+      error.code,
+    );
     return { success: false, error: error.message };
   }
 };
