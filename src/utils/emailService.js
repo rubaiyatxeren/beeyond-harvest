@@ -8,28 +8,27 @@ let transporter = null;
 
 const initTransporter = () => {
   if (!transporter) {
-    // 🔥 FORCE IPv4 (fix for Render ENETUNREACH error)
-    dns.setDefaultResultOrder("ipv4first");
-
     transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com", // ✅ Use host instead of service
+      host: "smtp.gmail.com",
       port: 587,
-      secure: false, // TLS
+      secure: false,
+
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // ⚠️ Must be Gmail App Password
+        pass: process.env.EMAIL_PASS,
       },
 
-      // 🔥 Force IPv4
-      family: 4,
+      // 🔥 HARD FORCE IPv4 (THIS IS THE REAL FIX)
+      lookup: (hostname, options, callback) => {
+        return dns.lookup(hostname, { family: 4 }, callback);
+      },
 
-      // Stability configs
       connectionTimeout: 10000,
       greetingTimeout: 10000,
       socketTimeout: 15000,
     });
 
-    console.log("📧 Gmail transporter created (IPv4 forced)");
+    console.log("📧 Gmail transporter created (FORCED IPv4 LOOKUP)");
   }
   return transporter;
 };
@@ -53,14 +52,10 @@ const sendEmail = async (to, subject, html) => {
     });
 
     console.log(`✅ Email sent: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
+    return { success: true };
   } catch (error) {
     console.error("❌ Email error:", error.message);
-
-    // Extra debug logs (helpful in production)
-    if (error.code) console.error("Error code:", error.code);
-    if (error.command) console.error("Error command:", error.command);
-
+    console.error("Code:", error.code);
     return { success: false, error: error.message };
   }
 };
