@@ -1,4 +1,3 @@
-// controllers/orderController.js
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const { sendEmail } = require("../utils/emailService");
@@ -394,42 +393,46 @@ const createOrder = async (req, res) => {
 
     console.log("✅ Order created successfully:", order.orderNumber);
 
-    // 🔔 SEND EMAIL NOTIFICATIONS
-    try {
-      // Send email to customer
-      const customerEmailHtml = generateOrderEmailTemplate(order, "new_order");
-      await sendEmail(
-        order.customer.email,
-        `🎉 Order Confirmed - ${order.orderNumber}`,
-        customerEmailHtml,
-      );
-      console.log(`📧 Customer email sent to: ${order.customer.email}`);
-
-      // Send email to admin
-      const adminEmails = process.env.ADMIN_EMAILS
-        ? process.env.ADMIN_EMAILS.split(",")
-        : ["ygstudiobd@gmail.com"];
-
-      const adminEmailHtml = generateAdminEmailTemplate(order, "new_order");
-      for (const adminEmail of adminEmails) {
-        await sendEmail(
-          adminEmail,
-          `🆕 New Order #${order.orderNumber} - Action Required`,
-          adminEmailHtml,
+    // 🔔 SEND EMAIL NOTIFICATIONS (disabled with DISABLE_EMAIL flag)
+    if (process.env.DISABLE_EMAIL !== "true") {
+      try {
+        // Send email to customer
+        const customerEmailHtml = generateOrderEmailTemplate(
+          order,
+          "new_order",
         );
-        console.log(`📧 Admin email sent to: ${adminEmail}`);
+        await sendEmail(
+          order.customer.email,
+          `🎉 Order Confirmed - ${order.orderNumber}`,
+          customerEmailHtml,
+        );
+        console.log(`📧 Customer email sent to: ${order.customer.email}`);
+
+        // Send email to admin
+        const adminEmails = process.env.ADMIN_EMAILS
+          ? process.env.ADMIN_EMAILS.split(",")
+          : ["ygstudiobd@gmail.com"];
+
+        const adminEmailHtml = generateAdminEmailTemplate(order, "new_order");
+        for (const adminEmail of adminEmails) {
+          await sendEmail(
+            adminEmail,
+            `🆕 New Order #${order.orderNumber} - Action Required`,
+            adminEmailHtml,
+          );
+          console.log(`📧 Admin email sent to: ${adminEmail}`);
+        }
+      } catch (emailError) {
+        console.log("📧 Email notification skipped:", emailError.message);
       }
-    } catch (emailError) {
-      console.error(
-        "⚠️ Email notification failed but order created:",
-        emailError.message,
-      );
+    } else {
+      console.log("📧 Email disabled by DISABLE_EMAIL flag");
     }
 
     res.status(201).json({
       success: true,
       data: order,
-      message: "Order created successfully. Email notifications sent.",
+      message: "Order created successfully.",
     });
   } catch (error) {
     console.error("❌ Create order error:", error);
@@ -534,7 +537,6 @@ const updateOrderStatus = async (req, res) => {
     if (req.body.deliveryPartner)
       order.deliveryPartner = req.body.deliveryPartner;
 
-    // Auto-complete payment when delivered
     if (newStatus === "delivered" && order.paymentStatus !== "paid") {
       order.paymentStatus = "paid";
       order.deliveryDate = new Date();
@@ -542,10 +544,8 @@ const updateOrderStatus = async (req, res) => {
 
     await order.save();
 
-    // 🔔 SEND EMAIL NOTIFICATION ON STATUS CHANGE
-    if (oldStatus !== newStatus) {
+    if (oldStatus !== newStatus && process.env.DISABLE_EMAIL !== "true") {
       try {
-        // Send to customer
         const customerEmailHtml = generateOrderEmailTemplate(
           order,
           "status_update",
@@ -556,32 +556,15 @@ const updateOrderStatus = async (req, res) => {
           customerEmailHtml,
         );
         console.log(`📧 Status update email sent to: ${order.customer.email}`);
-
-        // Send to admin
-        const adminEmails = process.env.ADMIN_EMAILS
-          ? process.env.ADMIN_EMAILS.split(",")
-          : ["ygstudiobd@gmail.com"];
-
-        const adminEmailHtml = generateAdminEmailTemplate(
-          order,
-          "status_update",
-        );
-        for (const adminEmail of adminEmails) {
-          await sendEmail(
-            adminEmail,
-            `🔄 Order ${order.orderNumber} Status: ${oldStatus} → ${newStatus}`,
-            adminEmailHtml,
-          );
-        }
       } catch (emailError) {
-        console.error("⚠️ Status update email failed:", emailError.message);
+        console.log("📧 Status update email skipped:", emailError.message);
       }
     }
 
     res.json({
       success: true,
       data: order,
-      message: `Order status updated to ${newStatus}${newStatus === "delivered" ? " & payment auto-completed" : ""}`,
+      message: `Order status updated to ${newStatus}`,
     });
   } catch (error) {
     console.error("Update order status error:", error);
@@ -634,10 +617,16 @@ const sendManualOrderEmail = async (req, res) => {
       });
     }
 
+    if (process.env.DISABLE_EMAIL === "true") {
+      return res.json({
+        success: false,
+        message: "Email is disabled",
+      });
+    }
+
     const { subject, customMessage } = req.body;
     let emailHtml = generateOrderEmailTemplate(order, "status_update");
 
-    // Add custom message if provided
     if (customMessage) {
       emailHtml = emailHtml.replace(
         '<div class="content">',
@@ -704,7 +693,6 @@ const getOrderStats = async (req, res) => {
       { $group: { _id: null, total: { $sum: "$total" } } },
     ]);
 
-    // Get recent orders for dashboard
     const recentOrders = await Order.find()
       .sort("-createdAt")
       .limit(5)
@@ -772,7 +760,6 @@ const getSalesAnalytics = async (req, res) => {
   }
 };
 
-// Export all functions
 module.exports = {
   createOrder,
   getOrders,
