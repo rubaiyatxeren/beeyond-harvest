@@ -393,7 +393,8 @@ const createOrder = async (req, res) => {
 
     console.log("✅ Order created successfully:", order.orderNumber);
 
-    // 🔔 SEND EMAIL NOTIFICATIONS (disabled with DISABLE_EMAIL flag)
+    // 🔔 SEND EMAIL NOTIFICATIONS
+    // Check if email should be sent (not disabled)
     if (process.env.DISABLE_EMAIL !== "true") {
       try {
         // Send email to customer
@@ -401,12 +402,17 @@ const createOrder = async (req, res) => {
           order,
           "new_order",
         );
-        await sendEmail(
+        const customerResult = await sendEmail(
           order.customer.email,
           `🎉 Order Confirmed - ${order.orderNumber}`,
           customerEmailHtml,
         );
-        console.log(`📧 Customer email sent to: ${order.customer.email}`);
+
+        if (customerResult.success) {
+          console.log(`📧 Customer email sent to: ${order.customer.email}`);
+        } else {
+          console.log(`⚠️ Customer email failed: ${customerResult.error}`);
+        }
 
         // Send email to admin
         const adminEmails = process.env.ADMIN_EMAILS
@@ -415,15 +421,18 @@ const createOrder = async (req, res) => {
 
         const adminEmailHtml = generateAdminEmailTemplate(order, "new_order");
         for (const adminEmail of adminEmails) {
-          await sendEmail(
-            adminEmail,
+          const adminResult = await sendEmail(
+            adminEmail.trim(),
             `🆕 New Order #${order.orderNumber} - Action Required`,
             adminEmailHtml,
           );
-          console.log(`📧 Admin email sent to: ${adminEmail}`);
+          if (adminResult.success) {
+            console.log(`📧 Admin email sent to: ${adminEmail}`);
+          }
         }
       } catch (emailError) {
-        console.log("📧 Email notification skipped:", emailError.message);
+        console.log("📧 Email notification error:", emailError.message);
+        // Don't fail the order if email fails
       }
     } else {
       console.log("📧 Email disabled by DISABLE_EMAIL flag");
@@ -537,6 +546,7 @@ const updateOrderStatus = async (req, res) => {
     if (req.body.deliveryPartner)
       order.deliveryPartner = req.body.deliveryPartner;
 
+    // Auto-complete payment when delivered
     if (newStatus === "delivered" && order.paymentStatus !== "paid") {
       order.paymentStatus = "paid";
       order.deliveryDate = new Date();
@@ -544,27 +554,35 @@ const updateOrderStatus = async (req, res) => {
 
     await order.save();
 
+    // 🔔 SEND EMAIL NOTIFICATION ON STATUS CHANGE
     if (oldStatus !== newStatus && process.env.DISABLE_EMAIL !== "true") {
       try {
         const customerEmailHtml = generateOrderEmailTemplate(
           order,
           "status_update",
         );
-        await sendEmail(
+        const emailResult = await sendEmail(
           order.customer.email,
           `📦 Order ${order.orderNumber} Status Updated to ${newStatus.toUpperCase()}`,
           customerEmailHtml,
         );
-        console.log(`📧 Status update email sent to: ${order.customer.email}`);
+
+        if (emailResult.success) {
+          console.log(
+            `📧 Status update email sent to: ${order.customer.email}`,
+          );
+        } else {
+          console.log(`⚠️ Status update email failed: ${emailResult.error}`);
+        }
       } catch (emailError) {
-        console.log("📧 Status update email skipped:", emailError.message);
+        console.log("📧 Status update email error:", emailError.message);
       }
     }
 
     res.json({
       success: true,
       data: order,
-      message: `Order status updated to ${newStatus}`,
+      message: `Order status updated to ${newStatus}${newStatus === "delivered" ? " & payment auto-completed" : ""}`,
     });
   } catch (error) {
     console.error("Update order status error:", error);
@@ -627,6 +645,7 @@ const sendManualOrderEmail = async (req, res) => {
     const { subject, customMessage } = req.body;
     let emailHtml = generateOrderEmailTemplate(order, "status_update");
 
+    // Add custom message if provided
     if (customMessage) {
       emailHtml = emailHtml.replace(
         '<div class="content">',
@@ -634,16 +653,23 @@ const sendManualOrderEmail = async (req, res) => {
       );
     }
 
-    await sendEmail(
+    const emailResult = await sendEmail(
       order.customer.email,
       subject || `Update on your order ${order.orderNumber}`,
       emailHtml,
     );
 
-    res.json({
-      success: true,
-      message: "Email sent successfully",
-    });
+    if (emailResult.success) {
+      res.json({
+        success: true,
+        message: "Email sent successfully",
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: emailResult.error || "Failed to send email",
+      });
+    }
   } catch (error) {
     console.error("Send manual email error:", error);
     res.status(500).json({
@@ -693,6 +719,7 @@ const getOrderStats = async (req, res) => {
       { $group: { _id: null, total: { $sum: "$total" } } },
     ]);
 
+    // Get recent orders for dashboard
     const recentOrders = await Order.find()
       .sort("-createdAt")
       .limit(5)
@@ -760,6 +787,7 @@ const getSalesAnalytics = async (req, res) => {
   }
 };
 
+// Export all functions
 module.exports = {
   createOrder,
   getOrders,
