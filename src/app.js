@@ -6,27 +6,21 @@ const rateLimit = require("express-rate-limit");
 const { errorHandler } = require("./middleware/errorMiddleware");
 const mongoose = require("mongoose");
 
-// Route imports
-const authRoutes = require("./routes/authRoutes");
-const categoryRoutes = require("./routes/categoryRoutes");
-const productRoutes = require("./routes/productRoutes");
-const bannerRoutes = require("./routes/bannerRoutes");
-const orderRoutes = require("./routes/orderRoutes");
-const dashboardRoutes = require("./routes/dashboardRoutes");
-
 const app = express();
+
+// ✅ FIX 1: Trust proxy (Render uses proxy)
+app.set("trust proxy", 1);
 
 // Security middleware
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
-    contentSecurityPolicy: false, // Disable if you're having issues with inline scripts
+    contentSecurityPolicy: false,
   }),
 );
 
-// In your app.js, update the allowedOrigins array
+// CORS configuration (keep as is)
 const allowedOrigins = [
-  // Development
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5500",
@@ -41,45 +35,22 @@ const allowedOrigins = [
   "http://192.168.56.1:3001",
   "http://192.168.56.1:5500",
   "http://192.168.56.1:5501",
-  
-  "https://beeharvest-j9t1kxin4-ygs-projects-fcdfef47.vercel.app",
-  "https://beeharvest-fo6755uyg-ygs-projects-fcdfef47.vercel.app",
-  
+  "https://admin-beeharvest.vercel.app",
   "https://beeharvest.vercel.app",
-  "https://beeharvest-admin.vercel.app",
-  
-  /\.vercel\.app$/,  // This regex allows all vercel.app subdomains
 ];
 
-// Update CORS configuration
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
-      
-      // Allow all in development
       if (process.env.NODE_ENV === "development") {
         return callback(null, true);
       }
-      
-      // Check if origin is allowed
-      const isAllowed = allowedOrigins.some(allowed => {
-        if (typeof allowed === 'string') {
-          return allowed === origin;
-        }
-        if (allowed instanceof RegExp) {
-          return allowed.test(origin);
-        }
-        return false;
-      });
-      
-      if (isAllowed) {
+      if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
         console.log("Blocked origin:", origin);
-        // Still allow for now - but log it
-        callback(null, true);
+        callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
@@ -93,10 +64,10 @@ app.use(
     ],
     exposedHeaders: ["Authorization"],
     maxAge: 86400,
-  })
+  }),
 );
 
-// Body parser - increase limit for images
+// Body parser
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
@@ -105,13 +76,25 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// Rate limiting
+// ✅ FIX 2: Rate limiting with proper proxy handling
 const limiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
   message: "Too many requests from this IP, please try again later.",
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  standardHeaders: true,
+  legacyHeaders: false,
+
+  // Custom key generator to get real client IP from proxy
+  keyGenerator: (req) => {
+    // Get client IP from X-Forwarded-For header (Render proxy)
+    const forwarded = req.headers["x-forwarded-for"];
+    if (forwarded) {
+      const ips = forwarded.split(",");
+      return ips[0].trim();
+    }
+    // Fallback to req.ip (works after trust proxy is set)
+    return req.ip;
+  },
 });
 app.use("/api", limiter);
 
