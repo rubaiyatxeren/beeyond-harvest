@@ -394,7 +394,7 @@ const createOrder = async (req, res) => {
     console.log("✅ Order created successfully:", order.orderNumber);
 
     // 🔔 SEND EMAIL NOTIFICATIONS
-    // Check if email should be sent (not disabled)
+    // In createOrder function, update the email section:
     if (process.env.DISABLE_EMAIL !== "true") {
       try {
         // Send email to customer
@@ -408,10 +408,12 @@ const createOrder = async (req, res) => {
           customerEmailHtml,
         );
 
-        if (customerResult.success) {
+        if (customerResult && customerResult.success) {
           console.log(`📧 Customer email sent to: ${order.customer.email}`);
         } else {
-          console.log(`⚠️ Customer email failed: ${customerResult.error}`);
+          console.log(
+            `⚠️ Customer email failed: ${customerResult?.error || "Unknown error"}`,
+          );
         }
 
         // Send email to admin
@@ -426,7 +428,7 @@ const createOrder = async (req, res) => {
             `🆕 New Order #${order.orderNumber} - Action Required`,
             adminEmailHtml,
           );
-          if (adminResult.success) {
+          if (adminResult && adminResult.success) {
             console.log(`📧 Admin email sent to: ${adminEmail}`);
           }
         }
