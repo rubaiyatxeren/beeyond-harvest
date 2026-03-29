@@ -1,4 +1,7 @@
 // utils/emailService.js
+// Provider: Brevo (formerly Sendinblue) — 300 emails/day free
+// npm install nodemailer
+
 const nodemailer = require("nodemailer");
 
 let transporter = null;
@@ -6,30 +9,27 @@ let transporter = null;
 const getTransporter = () => {
   if (transporter) return transporter;
 
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn("⚠️ EMAIL_USER or EMAIL_PASS not set");
+  if (!process.env.BREVO_USER || !process.env.BREVO_PASS) {
+    console.warn("⚠️ BREVO_USER or BREVO_PASS not set");
     return null;
   }
 
   transporter = nodemailer.createTransport({
-    service: "gmail", // works on both local & Render (IPv4-safe)
+    host: "smtp-relay.brevo.com",
+    port: 587,
+    secure: false,
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // 16-char App Password
+      user: process.env.BREVO_USER, // your Brevo account email
+      pass: process.env.BREVO_PASS, // SMTP key from Brevo dashboard (not login password)
     },
-    pool: true,
-    maxConnections: 3,
-    rateDelta: 1000,
-    rateLimit: 3,
   });
 
-  // Verify on startup so you know immediately if creds are wrong
   transporter.verify((err) => {
     if (err) {
-      console.error("❌ Email verify failed:", err.message);
-      transporter = null; // reset so next call retries
+      console.error("❌ Brevo verify failed:", err.message);
+      transporter = null;
     } else {
-      console.log("📧 Gmail transporter verified & ready");
+      console.log("📧 Brevo transporter verified & ready");
     }
   });
 
@@ -46,13 +46,13 @@ const sendEmail = async (to, subject, html) => {
   if (!t)
     return {
       success: false,
-      error: "Transporter unavailable — check EMAIL_USER/EMAIL_PASS",
+      error: "Transporter unavailable — check BREVO_USER/BREVO_PASS",
     };
 
   try {
     console.log(`📧 Sending to: ${to}`);
     const info = await t.sendMail({
-      from: `"Beeyond Harvest 🌾" <${process.env.EMAIL_USER}>`,
+      from: `"Beeyond Harvest 🌾" <${process.env.BREVO_USER}>`,
       to,
       subject,
       html,
