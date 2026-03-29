@@ -146,18 +146,6 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
 </html>`;
 };
 
-// ─── Helper: fire-and-forget email block ─────────────────────────────────────
-const sendEmailsInBackground = (fn) => {
-  if (process.env.DISABLE_EMAIL === "true") return;
-  setImmediate(async () => {
-    try {
-      await fn();
-    } catch (err) {
-      console.error("📧 Background email error:", err.message);
-    }
-  });
-};
-
 // ─── Controllers ─────────────────────────────────────────────────────────────
 
 // @desc    Create order
@@ -165,35 +153,57 @@ const sendEmailsInBackground = (fn) => {
 // @access  Public
 const createOrder = async (req, res) => {
   try {
-    console.log("📦 Creating order:", JSON.stringify(req.body, null, 2));
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("📦 [ORDER] New order request received");
+    console.log("📦 [ORDER] Body:", JSON.stringify(req.body, null, 2));
 
     const { items, customer, paymentMethod, deliveryCharge } = req.body;
 
-    if (!items || !items.length)
+    if (!items || !items.length) {
+      console.warn("⚠️  [ORDER] Rejected — no items");
       return res
         .status(400)
         .json({ success: false, message: "No items in order" });
-
-    if (!customer || !customer.name || !customer.email || !customer.phone)
+    }
+    if (!customer || !customer.name || !customer.email || !customer.phone) {
+      console.warn("⚠️  [ORDER] Rejected — missing customer fields:", {
+        name: !!customer?.name,
+        email: !!customer?.email,
+        phone: !!customer?.phone,
+      });
       return res
         .status(400)
         .json({ success: false, message: "Customer information is required" });
+    }
+
+    console.log(
+      `👤 [ORDER] Customer: ${customer.name} <${customer.email}> | ${customer.phone}`,
+    );
+    console.log(`🛒 [ORDER] Items count: ${items.length}`);
 
     let subtotal = 0;
     const orderItems = [];
 
     for (const item of items) {
+      console.log(`🔍 [ORDER] Looking up product: ${item.product}`);
       const product = await Product.findById(item.product);
-      if (!product)
+
+      if (!product) {
+        console.error(`❌ [ORDER] Product not found: ${item.product}`);
         return res.status(404).json({
           success: false,
           message: `Product ${item.product} not found`,
         });
-      if (product.stock < item.quantity)
+      }
+      if (product.stock < item.quantity) {
+        console.warn(
+          `⚠️  [ORDER] Insufficient stock — "${product.name}" has ${product.stock}, requested ${item.quantity}`,
+        );
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for "${product.name}". Available: ${product.stock}`,
         });
+      }
 
       const total = product.price * item.quantity;
       subtotal += total;
@@ -205,13 +215,20 @@ const createOrder = async (req, res) => {
         price: product.price,
         total,
       });
+      console.log(`   ✅ ${product.name} x${item.quantity} = ${total} ৳`);
     }
 
     const total = subtotal + (deliveryCharge || 60);
+    console.log(
+      `💰 [ORDER] Subtotal: ${subtotal} ৳ | Delivery: ${deliveryCharge || 60} ৳ | Total: ${total} ৳`,
+    );
+
     const date = new Date();
     const count = await Order.countDocuments();
     const orderNumber = `ORD-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}-${String(count + 1).padStart(5, "0")}`;
+    console.log(`🔢 [ORDER] Generated order number: ${orderNumber}`);
 
+    console.log("💾 [ORDER] Saving to database...");
     const order = await Order.create({
       orderNumber,
       customer: {
@@ -228,54 +245,94 @@ const createOrder = async (req, res) => {
       paymentStatus: "pending",
       orderStatus: "pending",
     });
+    console.log(`✅ [ORDER] Saved — ID: ${order._id}`);
 
+    console.log("📦 [ORDER] Updating product stock...");
     for (const item of items) {
       await Product.findByIdAndUpdate(item.product, {
         $inc: { stock: -item.quantity },
       });
     }
+    console.log("✅ [ORDER] Stock updated");
 
-    console.log("✅ Order created:", order.orderNumber);
-
-    // ✅ Respond immediately
+    console.log(
+      `🎉 [ORDER] ${orderNumber} created successfully — responding to client`,
+    );
     res.status(201).json({
       success: true,
       data: order,
       message: "Order created successfully.",
     });
 
-    // 🔔 Emails in background — never blocks the response
-    sendEmailsInBackground(async () => {
-      const customerResult = await sendEmail(
-        order.customer.email,
-        `🎉 Order Confirmed - ${order.orderNumber}`,
-        generateOrderEmailTemplate(order, "new_order"),
-      );
+    // 🔔 Background emails
+    if (process.env.DISABLE_EMAIL === "true") {
+      console.log("📧 [EMAIL] Skipped — DISABLE_EMAIL=true");
+      return;
+    }
+
+    setImmediate(async () => {
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       console.log(
-        customerResult?.success
-          ? `📧 Customer email sent to: ${order.customer.email}`
-          : `⚠️ Customer email failed: ${customerResult?.error}`,
+        `📧 [EMAIL] Starting background email job for ${orderNumber}`,
       );
 
-      const adminEmails = (
-        process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
-      ).split(",");
-      const adminHtml = generateAdminEmailTemplate(order, "new_order");
-      for (const email of adminEmails) {
-        const r = await sendEmail(
-          email.trim(),
-          `🆕 New Order #${order.orderNumber} - Action Required`,
-          adminHtml,
-        );
+      try {
+        // Customer email
         console.log(
-          r?.success
-            ? `📧 Admin email sent to: ${email.trim()}`
-            : `⚠️ Admin email failed (${email.trim()}): ${r?.error}`,
+          `📧 [EMAIL] Sending confirmation to customer: ${order.customer.email}`,
         );
+        const customerResult = await sendEmail(
+          order.customer.email,
+          `🎉 Order Confirmed - ${order.orderNumber}`,
+          generateOrderEmailTemplate(order, "new_order"),
+        );
+        if (customerResult?.success) {
+          console.log(
+            `✅ [EMAIL] Customer email sent → ${order.customer.email}`,
+          );
+        } else {
+          console.error(
+            `❌ [EMAIL] Customer email FAILED → ${order.customer.email}`,
+          );
+          console.error(`   Reason: ${customerResult?.error}`);
+        }
+
+        // Admin emails
+        const adminEmails = (
+          process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
+        ).split(",");
+        console.log(
+          `📧 [EMAIL] Sending admin notification to: ${adminEmails.join(", ")}`,
+        );
+        const adminHtml = generateAdminEmailTemplate(order, "new_order");
+
+        for (const email of adminEmails) {
+          const adminResult = await sendEmail(
+            email.trim(),
+            `🆕 New Order #${order.orderNumber} - Action Required`,
+            adminHtml,
+          );
+          if (adminResult?.success) {
+            console.log(`✅ [EMAIL] Admin email sent → ${email.trim()}`);
+          } else {
+            console.error(`❌ [EMAIL] Admin email FAILED → ${email.trim()}`);
+            console.error(`   Reason: ${adminResult?.error}`);
+          }
+        }
+
+        console.log(`📧 [EMAIL] Job complete for ${orderNumber}`);
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      } catch (emailError) {
+        console.error(
+          "❌ [EMAIL] Unexpected error in background job:",
+          emailError.message,
+        );
+        console.error(emailError.stack);
       }
     });
   } catch (error) {
-    console.error("❌ Create order error:", error);
+    console.error("❌ [ORDER] Create order crashed:", error.message);
+    console.error(error.stack);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -300,6 +357,10 @@ const getOrders = async (req, res) => {
       ];
     }
 
+    console.log(
+      `📋 [ORDERS] Fetching page ${page}, limit ${limit}, query:`,
+      JSON.stringify(query),
+    );
     const [orders, total] = await Promise.all([
       Order.find(query)
         .populate("items.product", "name images")
@@ -308,6 +369,7 @@ const getOrders = async (req, res) => {
         .limit(limit),
       Order.countDocuments(query),
     ]);
+    console.log(`✅ [ORDERS] Returned ${orders.length}/${total} orders`);
 
     res.json({
       success: true,
@@ -315,7 +377,7 @@ const getOrders = async (req, res) => {
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    console.error("Get orders error:", error);
+    console.error("❌ [ORDERS] Get orders error:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -325,14 +387,18 @@ const getOrders = async (req, res) => {
 // @access  Private
 const getOrder = async (req, res) => {
   try {
+    console.log(`🔍 [ORDER] Fetching order: ${req.params.id}`);
     const order = await Order.findById(req.params.id).populate("items.product");
-    if (!order)
+    if (!order) {
+      console.warn(`⚠️  [ORDER] Not found: ${req.params.id}`);
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
+    }
+    console.log(`✅ [ORDER] Found: ${order.orderNumber}`);
     res.json({ success: true, data: order });
   } catch (error) {
-    console.error("Get order error:", error);
+    console.error("❌ [ORDER] Get order error:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -342,51 +408,77 @@ const getOrder = async (req, res) => {
 // @access  Private
 const updateOrderStatus = async (req, res) => {
   try {
+    console.log(
+      `🔄 [STATUS] Update request — order: ${req.params.id}, newStatus: ${req.body.orderStatus}`,
+    );
     const order = await Order.findById(req.params.id);
-    if (!order)
+    if (!order) {
+      console.warn(`⚠️  [STATUS] Order not found: ${req.params.id}`);
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
+    }
 
     const oldStatus = order.orderStatus;
     const newStatus = req.body.orderStatus;
 
     order.orderStatus = newStatus;
-    if (req.body.trackingNumber) order.trackingNumber = req.body.trackingNumber;
+    if (req.body.trackingNumber) {
+      order.trackingNumber = req.body.trackingNumber;
+      console.log(
+        `📦 [STATUS] Tracking number set: ${req.body.trackingNumber}`,
+      );
+    }
     if (req.body.deliveryPartner)
       order.deliveryPartner = req.body.deliveryPartner;
 
     if (newStatus === "delivered" && order.paymentStatus !== "paid") {
       order.paymentStatus = "paid";
       order.deliveryDate = new Date();
+      console.log("💳 [STATUS] Payment auto-completed (delivered)");
     }
 
     await order.save();
+    console.log(
+      `✅ [STATUS] ${order.orderNumber}: ${oldStatus} → ${newStatus}`,
+    );
 
-    // ✅ Respond immediately
     res.json({
       success: true,
       data: order,
       message: `Order status updated to ${newStatus}${newStatus === "delivered" ? " & payment auto-completed" : ""}`,
     });
 
-    // 🔔 Status update email in background
-    if (oldStatus !== newStatus) {
-      sendEmailsInBackground(async () => {
-        const result = await sendEmail(
-          order.customer.email,
-          `📦 Order ${order.orderNumber} Status Updated to ${newStatus.toUpperCase()}`,
-          generateOrderEmailTemplate(order, "status_update"),
-        );
+    // 🔔 Background status email
+    if (oldStatus !== newStatus && process.env.DISABLE_EMAIL !== "true") {
+      setImmediate(async () => {
         console.log(
-          result?.success
-            ? `📧 Status email sent to: ${order.customer.email}`
-            : `⚠️ Status email failed: ${result?.error}`,
+          `📧 [EMAIL] Sending status update email for ${order.orderNumber} → ${newStatus}`,
         );
+        try {
+          const result = await sendEmail(
+            order.customer.email,
+            `📦 Order ${order.orderNumber} Status Updated to ${newStatus.toUpperCase()}`,
+            generateOrderEmailTemplate(order, "status_update"),
+          );
+          if (result?.success) {
+            console.log(
+              `✅ [EMAIL] Status email sent → ${order.customer.email}`,
+            );
+          } else {
+            console.error(
+              `❌ [EMAIL] Status email FAILED → ${order.customer.email}: ${result?.error}`,
+            );
+          }
+        } catch (err) {
+          console.error("❌ [EMAIL] Status email crashed:", err.message);
+        }
       });
+    } else if (oldStatus === newStatus) {
+      console.log("📧 [EMAIL] Skipped — status unchanged");
     }
   } catch (error) {
-    console.error("Update order status error:", error);
+    console.error("❌ [STATUS] Update crashed:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -396,6 +488,9 @@ const updateOrderStatus = async (req, res) => {
 // @access  Private
 const updatePaymentStatus = async (req, res) => {
   try {
+    console.log(
+      `💳 [PAYMENT] Update — order: ${req.params.id}, status: ${req.body.paymentStatus}`,
+    );
     const order = await Order.findById(req.params.id);
     if (!order)
       return res
@@ -403,9 +498,12 @@ const updatePaymentStatus = async (req, res) => {
         .json({ success: false, message: "Order not found" });
     order.paymentStatus = req.body.paymentStatus;
     await order.save();
+    console.log(
+      `✅ [PAYMENT] ${order.orderNumber} payment → ${req.body.paymentStatus}`,
+    );
     res.json({ success: true, data: order });
   } catch (error) {
-    console.error("Update payment status error:", error);
+    console.error("❌ [PAYMENT] Update error:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -415,13 +513,16 @@ const updatePaymentStatus = async (req, res) => {
 // @access  Private
 const sendManualOrderEmail = async (req, res) => {
   try {
+    console.log(`📧 [MANUAL EMAIL] Request for order: ${req.params.id}`);
     const order = await Order.findById(req.params.id);
     if (!order)
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
-    if (process.env.DISABLE_EMAIL === "true")
+    if (process.env.DISABLE_EMAIL === "true") {
+      console.log("📧 [MANUAL EMAIL] Skipped — DISABLE_EMAIL=true");
       return res.json({ success: false, message: "Email is disabled" });
+    }
 
     const { subject, customMessage } = req.body;
     let emailHtml = generateOrderEmailTemplate(order, "status_update");
@@ -433,21 +534,27 @@ const sendManualOrderEmail = async (req, res) => {
       );
     }
 
+    console.log(
+      `📧 [MANUAL EMAIL] Sending to: ${order.customer.email}, subject: "${subject || "default"}"`,
+    );
     const result = await sendEmail(
       order.customer.email,
       subject || `Update on your order ${order.orderNumber}`,
       emailHtml,
     );
+
     if (result.success) {
+      console.log(`✅ [MANUAL EMAIL] Sent to ${order.customer.email}`);
       res.json({ success: true, message: "Email sent successfully" });
     } else {
+      console.error(`❌ [MANUAL EMAIL] Failed: ${result.error}`);
       res.status(500).json({
         success: false,
         message: result.error || "Failed to send email",
       });
     }
   } catch (error) {
-    console.error("Send manual email error:", error);
+    console.error("❌ [MANUAL EMAIL] Crashed:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -457,6 +564,7 @@ const sendManualOrderEmail = async (req, res) => {
 // @access  Private
 const getOrderStats = async (req, res) => {
   try {
+    console.log("📊 [STATS] Fetching order statistics...");
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -493,6 +601,10 @@ const getOrderStats = async (req, res) => {
         .select("orderNumber customer total orderStatus createdAt"),
     ]);
 
+    console.log(
+      `✅ [STATS] total=${totalOrders} | pending=${pendingOrders} | delivered=${completedOrders} | cancelled=${cancelledOrders} | today=${todayOrders}`,
+    );
+
     res.json({
       success: true,
       data: {
@@ -508,7 +620,7 @@ const getOrderStats = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get order stats error:", error);
+    console.error("❌ [STATS] Error:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -519,6 +631,7 @@ const getOrderStats = async (req, res) => {
 const getSalesAnalytics = async (req, res) => {
   try {
     const { period = "monthly" } = req.query;
+    console.log(`📈 [ANALYTICS] Fetching ${period} sales data`);
     const groupBy =
       period === "weekly" ? { $week: "$createdAt" } : { $month: "$createdAt" };
 
@@ -530,9 +643,10 @@ const getSalesAnalytics = async (req, res) => {
       { $sort: { _id: 1 } },
     ]);
 
+    console.log(`✅ [ANALYTICS] Returned ${salesData.length} data points`);
     res.json({ success: true, data: salesData });
   } catch (error) {
-    console.error("Sales analytics error:", error);
+    console.error("❌ [ANALYTICS] Error:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
