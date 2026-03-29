@@ -43,6 +43,7 @@ const allowedOrigins = [
   // Add your production URLs when deploying
   "https://admin-beeharvest.vercel.app",
   "https://beeharvest.vercel.app",
+  https://beeharvest-fo6755uyg-ygs-projects-fcdfef47.vercel.app,
 ];
 
 app.use(
