@@ -1,40 +1,65 @@
 // utils/emailService.js
-// Provider: Brevo (formerly Sendinblue) — 300 emails/day free
-// npm install nodemailer dotenv
+// Supports both Gmail and Brevo - automatically detects which to use
 
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
-dotenv.config(); // Make sure this is called to load .env variables
+dotenv.config();
 
 let transporter = null;
 
 const getTransporter = () => {
   if (transporter) return transporter;
 
-  if (!process.env.BREVO_USER || !process.env.BREVO_PASS) {
-    console.warn("⚠️ BREVO_USER or BREVO_PASS not set");
-    console.log("Current BREVO_USER:", process.env.BREVO_USER ? "Set" : "Missing");
-    console.log("Current BREVO_PASS:", process.env.BREVO_PASS ? "Set" : "Missing");
+  let config = null;
+  
+  // Try Brevo first (recommended - free tier)
+  if (process.env.BREVO_USER && process.env.BREVO_PASS) {
+    console.log("📧 Configuring Brevo email service...");
+    config = {
+      host: "smtp-relay.brevo.com",
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.BREVO_USER,
+        pass: process.env.BREVO_PASS,
+      },
+    };
+  } 
+  // Fallback to Gmail
+  else if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    console.log("📧 Configuring Gmail email service...");
+    config = {
+      host: process.env.EMAIL_HOST || "smtp.gmail.com",
+      port: parseInt(process.env.EMAIL_PORT) || 587,
+      secure: process.env.EMAIL_PORT === "465",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    };
+  } 
+  else {
+    console.error("❌ Email not configured: No valid credentials found");
+    console.log("📧 Please set either:");
+    console.log("   - BREVO_USER and BREVO_PASS (recommended for free tier)");
+    console.log("   - EMAIL_USER and EMAIL_PASS (for Gmail)");
     return null;
   }
 
   transporter = nodemailer.createTransport({
-    host: "smtp-relay.brevo.com",
-    port: 587,
-    secure: false,
-    auth: {
-      user: process.env.BREVO_USER,
-      pass: process.env.BREVO_PASS,
-    },
+    ...config,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
 
-  // Don't await verify - it's just a check
-  transporter.verify((err) => {
-    if (err) {
-      console.error("❌ Brevo verify failed:", err.message);
+  // Verify connection
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error("❌ Email transporter verification failed:", error.message);
       transporter = null;
     } else {
-      console.log("📧 Brevo transporter verified & ready");
+      console.log("✅ Email transporter ready - You can send emails now");
     }
   });
 
@@ -42,31 +67,34 @@ const getTransporter = () => {
 };
 
 const sendEmail = async (to, subject, html) => {
+  // Check if email is disabled
   if (process.env.DISABLE_EMAIL === "true") {
-    console.log("📧 Email skipped (DISABLE_EMAIL=true)");
-    return { success: true };
+    console.log("📧 Email disabled by DISABLE_EMAIL flag");
+    return { success: true, message: "Email disabled" };
   }
 
-  const t = getTransporter();
-  if (!t) {
-    return {
-      success: false,
-      error: "Transporter unavailable — check BREVO_USER/BREVO_PASS",
-    };
+  const transporter = getTransporter();
+  if (!transporter) {
+    return { success: false, error: "Email transporter not available - check credentials" };
   }
+
+  // Determine sender email
+  let senderEmail = process.env.BREVO_USER || process.env.EMAIL_USER;
+  let fromEmail = `"Beeyond Harvest 🌾" <${senderEmail}>`;
 
   try {
     console.log(`📧 Sending email to: ${to}`);
-    const info = await t.sendMail({
-      from: `"Beeyond Harvest 🌾" <${process.env.BREVO_USER}>`,
-      to,
-      subject,
-      html,
+    const info = await transporter.sendMail({
+      from: fromEmail,
+      to: to,
+      subject: subject,
+      html: html,
     });
+
     console.log(`✅ Email sent to ${to}: ${info.messageId}`);
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error(`❌ Email failed to ${to}:`, error.message, "| Code:", error.code);
+    console.error(`❌ Failed to send email to ${to}:`, error.message);
     return { success: false, error: error.message };
   }
 };
