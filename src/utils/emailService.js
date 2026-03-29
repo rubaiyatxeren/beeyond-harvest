@@ -1,5 +1,5 @@
 // utils/emailService.js
-// Supports both Gmail and Brevo - automatically detects which to use
+// Provider: Brevo (formerly Sendinblue) — 300 emails/day free
 
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
@@ -10,56 +10,50 @@ let transporter = null;
 const getTransporter = () => {
   if (transporter) return transporter;
 
-  let config = null;
-  
-  // Try Brevo first (recommended - free tier)
-  if (process.env.BREVO_USER && process.env.BREVO_PASS) {
-    console.log("📧 Configuring Brevo email service...");
-    config = {
-      host: "smtp-relay.brevo.com",
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.BREVO_USER,
-        pass: process.env.BREVO_PASS,
-      },
-    };
-  } 
-  // Fallback to Gmail
-  else if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-    console.log("📧 Configuring Gmail email service...");
-    config = {
-      host: process.env.EMAIL_HOST || "smtp.gmail.com",
-      port: parseInt(process.env.EMAIL_PORT) || 587,
-      secure: process.env.EMAIL_PORT === "465",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    };
-  } 
-  else {
-    console.error("❌ Email not configured: No valid credentials found");
-    console.log("📧 Please set either:");
-    console.log("   - BREVO_USER and BREVO_PASS (recommended for free tier)");
-    console.log("   - EMAIL_USER and EMAIL_PASS (for Gmail)");
+  // ONLY use Brevo - no Gmail fallback
+  if (!process.env.BREVO_USER || !process.env.BREVO_PASS) {
+    console.error("❌ Brevo credentials missing!");
+    console.error(
+      "   Please set BREVO_USER and BREVO_PASS in environment variables",
+    );
+    console.error(
+      "   Current BREVO_USER:",
+      process.env.BREVO_USER ? "✓ Set" : "✗ Missing",
+    );
+    console.error(
+      "   Current BREVO_PASS:",
+      process.env.BREVO_PASS ? "✓ Set" : "✗ Missing",
+    );
     return null;
   }
 
+  console.log("📧 Configuring Brevo email service...");
+
   transporter = nodemailer.createTransport({
-    ...config,
+    host: "smtp-relay.brevo.com",
+    port: 587,
+    secure: false, // false for port 587
+    auth: {
+      user: process.env.BREVO_USER,
+      pass: process.env.BREVO_PASS,
+    },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
+    // Force IPv4 to avoid IPv6 issues
+    family: 4,
   });
 
-  // Verify connection
+  // Don't verify immediately - do it async
   transporter.verify((error, success) => {
     if (error) {
-      console.error("❌ Email transporter verification failed:", error.message);
+      console.error("❌ Brevo verification failed:", error.message);
+      console.error(
+        "   Please check your Brevo credentials at: https://app.brevo.com/settings/keys/smtp",
+      );
       transporter = null;
     } else {
-      console.log("✅ Email transporter ready - You can send emails now");
+      console.log("✅ Brevo email service ready - 300 emails/day free tier");
     }
   });
 
@@ -75,14 +69,16 @@ const sendEmail = async (to, subject, html) => {
 
   const transporter = getTransporter();
   if (!transporter) {
-    return { success: false, error: "Email transporter not available - check credentials" };
+    return {
+      success: false,
+      error: "Email service unavailable - Brevo not configured",
+    };
   }
 
-  // Determine sender email
-  let senderEmail = process.env.BREVO_USER || process.env.EMAIL_USER;
-  let fromEmail = `"Beeyond Harvest 🌾" <${senderEmail}>`;
-
   try {
+    const senderEmail = process.env.BREVO_USER;
+    const fromEmail = `"Beeyond Harvest 🌾" <${senderEmail}>`;
+
     console.log(`📧 Sending email to: ${to}`);
     const info = await transporter.sendMail({
       from: fromEmail,
