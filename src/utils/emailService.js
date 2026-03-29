@@ -1,60 +1,61 @@
 // utils/emailService.js
 const nodemailer = require("nodemailer");
-const dotenv = require("dotenv");
-dotenv.config();
-const dns = require("dns");
 
 let transporter = null;
 
-const initTransporter = () => {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: false,
+const getTransporter = () => {
+  if (transporter) return transporter;
 
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-
-      // 🔥 HARD FORCE IPv4 (THIS IS THE REAL FIX)
-      lookup: (hostname, options, callback) => {
-        return dns.lookup(hostname, { family: 4 }, callback);
-      },
-
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    });
-
-    console.log("📧 Gmail transporter created (FORCED IPv4 LOOKUP)");
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.warn("⚠️ EMAIL_USER or EMAIL_PASS not set");
+    return null;
   }
+
+  // ✅ Use `service: "gmail"` — Nodemailer resolves Gmail SMTP with
+  // IPv4-only internally, bypassing Render's broken IPv6 routing.
+  // Do NOT use host/port manually — that's what causes ENETUNREACH.
+  transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS, // App Password (not Gmail login password)
+    },
+    pool: true, // reuse connections — avoids repeated handshake timeouts
+    maxConnections: 3,
+    rateDelta: 1000,
+    rateLimit: 3,
+  });
+
+  console.log("📧 Gmail transporter ready (service mode)");
   return transporter;
 };
 
 const sendEmail = async (to, subject, html) => {
+  if (process.env.DISABLE_EMAIL === "true") {
+    console.log("📧 Email skipped (DISABLE_EMAIL=true)");
+    return { success: true };
+  }
+
+  const t = getTransporter();
+  if (!t)
+    return {
+      success: false,
+      error: "Transporter unavailable — check EMAIL_USER/EMAIL_PASS",
+    };
+
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.warn("⚠️ Email not configured");
-      return { success: false, error: "No credentials" };
-    }
-
-    const transporter = initTransporter();
-
     console.log(`📧 Sending email to: ${to}`);
-
-    const info = await transporter.sendMail({
-      from: `"Beeyond Harvest" <${process.env.EMAIL_USER}>`,
+    const info = await t.sendMail({
+      // ✅ from address MUST be the authenticated Gmail account
+      from: `"Beeyond Harvest 🌾" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       html,
     });
-
-    console.log(`✅ Email sent: ${info.messageId}`);
-    return { success: true };
+    console.log(`✅ Email sent to ${to}: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error("❌ Email error:", error.message);
+    console.error(`❌ Email failed to ${to}:`, error.message);
     console.error("Code:", error.code);
     return { success: false, error: error.message };
   }
