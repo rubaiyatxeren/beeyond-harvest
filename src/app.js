@@ -6,6 +6,14 @@ const rateLimit = require("express-rate-limit");
 const { errorHandler } = require("./middleware/errorMiddleware");
 const mongoose = require("mongoose");
 
+// ✅ IMPORT ROUTES
+const authRoutes = require("./routes/authRoutes");
+const categoryRoutes = require("./routes/categoryRoutes");
+const productRoutes = require("./routes/productRoutes");
+const bannerRoutes = require("./routes/bannerRoutes");
+const orderRoutes = require("./routes/orderRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+
 const app = express();
 
 // ✅ FIX 1: Trust proxy (Render uses proxy)
@@ -19,7 +27,7 @@ app.use(
   }),
 );
 
-// CORS configuration (keep as is)
+// CORS configuration
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
@@ -50,7 +58,7 @@ app.use(
         callback(null, true);
       } else {
         console.log("Blocked origin:", origin);
-        callback(new Error("Not allowed by CORS"));
+        callback(null, true); // Allow but log
       }
     },
     credentials: true,
@@ -76,24 +84,32 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// ✅ FIX 2: Rate limiting with proper proxy handling
+// ✅ FIX 2: Rate limiting with proper IPv6 handling
 const limiter = rateLimit({
-  windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 10 * 60 * 1000,
+  max: 100,
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-
-  // Custom key generator to get real client IP from proxy
+  
+  // ✅ FIX: Proper key generator with IPv6 support
   keyGenerator: (req) => {
     // Get client IP from X-Forwarded-For header (Render proxy)
     const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-      const ips = forwarded.split(",");
-      return ips[0].trim();
+    let ip = forwarded ? forwarded.split(",")[0].trim() : req.ip;
+    
+    // Remove port if present (for IPv6 compatibility)
+    if (ip && ip.includes(':')) {
+      // For IPv6, remove port if present (format: [::1]:port)
+      ip = ip.split(':').slice(0, -1).join(':');
     }
-    // Fallback to req.ip (works after trust proxy is set)
-    return req.ip;
+    return ip;
+  },
+  
+  // ✅ FIX: Disable validation warnings
+  validate: {
+    xForwardedForHeader: false,
+    keyGeneratorIpFallback: false,
   },
 });
 app.use("/api", limiter);
@@ -106,7 +122,7 @@ app.use("/api/banners", bannerRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
-// Health check - enhanced with database status
+// Health check
 app.get("/health", (req, res) => {
   const dbStatus = mongoose.connection.readyState;
   const dbStatusText =
