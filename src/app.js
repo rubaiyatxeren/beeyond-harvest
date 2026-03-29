@@ -24,8 +24,9 @@ app.use(
   }),
 );
 
-// CORS configuration
+// In your app.js, update the allowedOrigins array
 const allowedOrigins = [
+  // Development
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5500",
@@ -40,29 +41,45 @@ const allowedOrigins = [
   "http://192.168.56.1:3001",
   "http://192.168.56.1:5500",
   "http://192.168.56.1:5501",
-  // Add your production URLs when deploying
-  "https://admin-beeharvest.vercel.app",
+  
+  "https://beeharvest-j9t1kxin4-ygs-projects-fcdfef47.vercel.app",
+  "https://beeharvest-fo6755uyg-ygs-projects-fcdfef47.vercel.app",
+  
   "https://beeharvest.vercel.app",
-  https://beeharvest-fo6755uyg-ygs-projects-fcdfef47.vercel.app,
+  "https://beeharvest-admin.vercel.app",
+  
+  /\.vercel\.app$/,  // This regex allows all vercel.app subdomains
 ];
 
+// Update CORS configuration
 app.use(
   cors({
     origin: function (origin, callback) {
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
-
+      
       // Allow all in development
       if (process.env.NODE_ENV === "development") {
         return callback(null, true);
       }
-
+      
       // Check if origin is allowed
-      if (allowedOrigins.indexOf(origin) !== -1) {
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (typeof allowed === 'string') {
+          return allowed === origin;
+        }
+        if (allowed instanceof RegExp) {
+          return allowed.test(origin);
+        }
+        return false;
+      });
+      
+      if (isAllowed) {
         callback(null, true);
       } else {
         console.log("Blocked origin:", origin);
-        callback(new Error("Not allowed by CORS"));
+        // Still allow for now - but log it
+        callback(null, true);
       }
     },
     credentials: true,
@@ -75,8 +92,8 @@ app.use(
       "Origin",
     ],
     exposedHeaders: ["Authorization"],
-    maxAge: 86400, // 24 hours
-  }),
+    maxAge: 86400,
+  })
 );
 
 // Body parser - increase limit for images
