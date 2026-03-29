@@ -311,17 +311,15 @@ const createOrder = async (req, res) => {
 
     // Validate required fields
     if (!items || !items.length) {
-      return res.status(400).json({
-        success: false,
-        message: "No items in order",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "No items in order" });
     }
 
     if (!customer || !customer.name || !customer.email || !customer.phone) {
-      return res.status(400).json({
-        success: false,
-        message: "Customer information is required",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Customer information is required" });
     }
 
     // Validate stock and calculate totals
@@ -340,7 +338,7 @@ const createOrder = async (req, res) => {
       if (product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for product: ${product.name}. Available: ${product.stock}`,
+          message: `Insufficient stock for "${product.name}". Available: ${product.stock}`,
         });
       }
 
@@ -353,7 +351,7 @@ const createOrder = async (req, res) => {
         sku: product.sku,
         quantity: item.quantity,
         price: product.price,
-        total: total,
+        total,
       });
     }
 
@@ -393,64 +391,58 @@ const createOrder = async (req, res) => {
 
     console.log("✅ Order created successfully:", order.orderNumber);
 
-    // 🔔 SEND EMAIL NOTIFICATIONS
-    // In createOrder function, update the email section:
-    if (process.env.DISABLE_EMAIL !== "true") {
-      try {
-        // Send email to customer
-        const customerEmailHtml = generateOrderEmailTemplate(
-          order,
-          "new_order",
-        );
-        const customerResult = await sendEmail(
-          order.customer.email,
-          `🎉 Order Confirmed - ${order.orderNumber}`,
-          customerEmailHtml,
-        );
-
-        if (customerResult && customerResult.success) {
-          console.log(`📧 Customer email sent to: ${order.customer.email}`);
-        } else {
-          console.log(
-            `⚠️ Customer email failed: ${customerResult?.error || "Unknown error"}`,
-          );
-        }
-
-        // Send email to admin
-        const adminEmails = process.env.ADMIN_EMAILS
-          ? process.env.ADMIN_EMAILS.split(",")
-          : ["ygstudiobd@gmail.com"];
-
-        const adminEmailHtml = generateAdminEmailTemplate(order, "new_order");
-        for (const adminEmail of adminEmails) {
-          const adminResult = await sendEmail(
-            adminEmail.trim(),
-            `🆕 New Order #${order.orderNumber} - Action Required`,
-            adminEmailHtml,
-          );
-          if (adminResult && adminResult.success) {
-            console.log(`📧 Admin email sent to: ${adminEmail}`);
-          }
-        }
-      } catch (emailError) {
-        console.log("📧 Email notification error:", emailError.message);
-        // Don't fail the order if email fails
-      }
-    } else {
-      console.log("📧 Email disabled by DISABLE_EMAIL flag");
-    }
-
+    // ✅ Respond to client immediately — don't wait for emails
     res.status(201).json({
       success: true,
       data: order,
       message: "Order created successfully.",
     });
+
+    // 🔔 Send emails in background (non-blocking — won't slow down the response)
+    if (process.env.DISABLE_EMAIL !== "true") {
+      setImmediate(async () => {
+        try {
+          // Customer confirmation email
+          const customerHtml = generateOrderEmailTemplate(order, "new_order");
+          const customerResult = await sendEmail(
+            order.customer.email,
+            `🎉 Order Confirmed - ${order.orderNumber}`,
+            customerHtml,
+          );
+          console.log(
+            customerResult?.success
+              ? `📧 Customer email sent to: ${order.customer.email}`
+              : `⚠️ Customer email failed: ${customerResult?.error}`,
+          );
+
+          // Admin notification emails
+          const adminEmails = process.env.ADMIN_EMAILS
+            ? process.env.ADMIN_EMAILS.split(",")
+            : ["ygstudiobd@gmail.com"];
+
+          const adminHtml = generateAdminEmailTemplate(order, "new_order");
+          for (const adminEmail of adminEmails) {
+            const adminResult = await sendEmail(
+              adminEmail.trim(),
+              `🆕 New Order #${order.orderNumber} - Action Required`,
+              adminHtml,
+            );
+            console.log(
+              adminResult?.success
+                ? `📧 Admin email sent to: ${adminEmail.trim()}`
+                : `⚠️ Admin email failed (${adminEmail.trim()}): ${adminResult?.error}`,
+            );
+          }
+        } catch (emailError) {
+          console.error("📧 Background email error:", emailError.message);
+        }
+      });
+    } else {
+      console.log("📧 Email disabled by DISABLE_EMAIL flag");
+    }
   } catch (error) {
     console.error("❌ Create order error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
