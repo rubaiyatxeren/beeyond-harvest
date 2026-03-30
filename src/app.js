@@ -91,21 +91,21 @@ const limiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  
+
   // ✅ FIX: Proper key generator with IPv6 support
   keyGenerator: (req) => {
     // Get client IP from X-Forwarded-For header (Render proxy)
     const forwarded = req.headers["x-forwarded-for"];
     let ip = forwarded ? forwarded.split(",")[0].trim() : req.ip;
-    
+
     // Remove port if present (for IPv6 compatibility)
-    if (ip && ip.includes(':')) {
+    if (ip && ip.includes(":")) {
       // For IPv6, remove port if present (format: [::1]:port)
-      ip = ip.split(':').slice(0, -1).join(':');
+      ip = ip.split(":").slice(0, -1).join(":");
     }
     return ip;
   },
-  
+
   // ✅ FIX: Disable validation warnings
   validate: {
     xForwardedForHeader: false,
@@ -114,7 +114,7 @@ const limiter = rateLimit({
 });
 app.use("/api", limiter);
 
-// Routes
+// app.js — fix: remove the first duplicate, keep only this one
 app.use("/api/auth", authRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/products", productRoutes);
