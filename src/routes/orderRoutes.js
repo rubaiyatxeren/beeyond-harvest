@@ -11,6 +11,7 @@ const {
   getOrderStats,
   getSalesAnalytics,
   sendManualOrderEmail,
+  getOrdersByPhone,
 } = require("../controllers/orderController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -80,5 +81,7 @@ router.get("/:id", protect, getOrder);
 router.put("/:id/status", protect, updateOrderStatus);
 router.put("/:id/payment", protect, updatePaymentStatus);
 router.post("/:id/send-email", protect, sendManualOrderEmail);
+
+router.get("/phone/:phone", getOrdersByPhone);
 
 module.exports = router;
