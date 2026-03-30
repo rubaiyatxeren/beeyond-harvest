@@ -114,15 +114,22 @@ const orderSchema = new mongoose.Schema(
   },
 );
 
-// Generate order number before saving
 orderSchema.pre("save", async function () {
   if (!this.orderNumber) {
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
-    const Order = mongoose.model("Order");
-    const count = await Order.countDocuments();
-    this.orderNumber = `ORD-${year}${month}-${String(count + 1).padStart(5, "0")}`;
+
+    try {
+      // Get the count using the model after it's defined
+      const OrderModel = mongoose.models.Order || mongoose.model("Order");
+      const count = await OrderModel.countDocuments();
+      this.orderNumber = `ORD-${year}${month}-${String(count + 1).padStart(5, "0")}`;
+    } catch (error) {
+      // Fallback: use timestamp if count fails
+      const timestamp = Date.now().toString().slice(-5);
+      this.orderNumber = `ORD-${year}${month}-${timestamp}`;
+    }
   }
 });
 
