@@ -651,10 +651,70 @@ const getSalesAnalytics = async (req, res) => {
   }
 };
 
+// @desc    Get orders by customer phone number (PUBLIC)
+// @route   GET /api/orders/phone/:phone
+// @access  Public - NO AUTH REQUIRED
+const getOrdersByPhone = async (req, res) => {
+  try {
+    const phoneNumber = req.params.phone;
+
+    // Validate Bangladeshi phone number
+    const cleanPhone = phoneNumber.replace(/\D/g, "");
+    if (!cleanPhone || !/^01[3-9]\d{8}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid Bangladeshi phone number required (01XXXXXXXXX)",
+      });
+    }
+
+    console.log(
+      `📞 [PUBLIC PHONE SEARCH] Looking for orders with phone: ${cleanPhone}`,
+    );
+
+    // Find orders with this phone number
+    // Only return necessary fields (no sensitive data)
+    const orders = await Order.find({
+      "customer.phone": {
+        $regex: `${cleanPhone}$|${cleanPhone.slice(-11)}$`,
+        $options: "i",
+      },
+    })
+      .select(
+        "orderNumber customer.name customer.phone items.name items.quantity items.price items.total subtotal deliveryCharge total paymentMethod orderStatus createdAt trackingNumber",
+      )
+      .sort("-createdAt")
+      .limit(50); // Limit to last 50 orders for performance
+
+    // Remove sensitive customer email from response (optional)
+    const sanitizedOrders = orders.map((order) => {
+      const orderObj = order.toObject();
+      delete orderObj.customer?.email; // Don't expose email publicly
+      return orderObj;
+    });
+
+    console.log(
+      `✅ [PUBLIC PHONE SEARCH] Found ${sanitizedOrders.length} orders for ${cleanPhone}`,
+    );
+
+    res.json({
+      success: true,
+      count: sanitizedOrders.length,
+      data: sanitizedOrders,
+    });
+  } catch (error) {
+    console.error("❌ [PUBLIC PHONE SEARCH] Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   createOrder,
   getOrders,
   getOrder,
+  getOrdersByPhone, // Add this
   updateOrderStatus,
   updatePaymentStatus,
   getOrderStats,
