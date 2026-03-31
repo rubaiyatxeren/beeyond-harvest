@@ -76,7 +76,6 @@ router.get("/track/:orderNumber", async (req, res) => {
 });
 // ─── LOAD TEST ROUTE (remove in production) ───────────────────────────────────
 // POST /api/orders/load-test
-// Body: { count: 10, sendEmails: false }
 router.post("/load-test", async (req, res) => {
   const { count = 10, sendEmails = false } = req.body;
 
@@ -148,6 +147,12 @@ router.post("/load-test", async (req, res) => {
   const BATCH_SIZE = 50;
   const orders = [];
 
+  // Get base timestamp for unique order numbers
+  const timestampBase = Date.now();
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
   for (let i = 0; i < count; i++) {
     const firstName = rand(firstNames);
     const lastName = rand(lastNames);
@@ -168,6 +173,7 @@ router.post("/load-test", async (req, res) => {
       price: p.price,
       total: p.price * randInt(1, 3),
     }));
+
     // Recalculate totals properly
     items.forEach((item) => {
       item.total = item.price * item.quantity;
@@ -176,7 +182,11 @@ router.post("/load-test", async (req, res) => {
     const deliveryCharge = rand([0, 60, 80, 100]);
     const total = subtotal + deliveryCharge;
 
+    // Generate unique order number for load test
+    const orderNumber = `LT-${year}${month}-${String(i + 1).padStart(5, "0")}-${timestampBase}`;
+
     orders.push({
+      orderNumber, // Add the unique order number
       customer: {
         name,
         email,
@@ -203,14 +213,27 @@ router.post("/load-test", async (req, res) => {
   for (let b = 0; b < orders.length; b += BATCH_SIZE) {
     const batch = orders.slice(b, b + BATCH_SIZE);
     try {
-      await Order.insertMany(batch, { ordered: false }); // ordered:false = don't stop on error
+      await Order.insertMany(batch, {
+        ordered: false, // don't stop on error
+        bypassDocumentValidation: true, // Skip validation if needed
+      });
       results.created += batch.length;
     } catch (err) {
       // insertMany with ordered:false reports partial success
       const inserted = err.result?.nInserted || 0;
       results.created += inserted;
       results.failed += batch.length - inserted;
-      results.errors.push(err.message.slice(0, 100));
+
+      // Log detailed error information
+      if (err.writeErrors) {
+        err.writeErrors.forEach((error) => {
+          results.errors.push(
+            `Order ${error.err.op.orderNumber}: ${error.err.errmsg}`,
+          );
+        });
+      } else {
+        results.errors.push(err.message.slice(0, 200));
+      }
     }
   }
 
@@ -220,6 +243,11 @@ router.post("/load-test", async (req, res) => {
     `🧪 [LOAD TEST] ${results.created}/${count} orders created in ${elapsed}s`,
   );
 
+  if (results.failed > 0) {
+    console.log(`❌ Failed orders: ${results.failed}`);
+    console.log(`📋 Errors:`, results.errors);
+  }
+
   res.json({
     success: true,
     summary: {
@@ -227,7 +255,10 @@ router.post("/load-test", async (req, res) => {
       created: results.created,
       failed: results.failed,
       duration: `${elapsed}s`,
-      rate: `${(results.created / elapsed).toFixed(0)} orders/sec`,
+      rate:
+        results.created > 0
+          ? `${(results.created / elapsed).toFixed(0)} orders/sec`
+          : "0 orders/sec",
       emailsSent: sendEmails,
     },
     errors: results.errors.length ? results.errors : undefined,
