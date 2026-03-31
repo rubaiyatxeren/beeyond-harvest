@@ -183,7 +183,7 @@ router.post("/load-test", async (req, res) => {
     const total = subtotal + deliveryCharge;
 
     // Generate unique order number for load test
-    const orderNumber = `LT-${year}${month}-${String(i + 1).padStart(5, "0")}`;
+    const orderNumber = `LT-${year}${month}-${String(i + 1).padStart(5, "0")}-${timestampBase}`;
 
     orders.push({
       orderNumber, // Add the unique order number
