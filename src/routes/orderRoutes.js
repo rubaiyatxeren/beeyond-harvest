@@ -15,6 +15,7 @@ const {
   getOrdersByPhone,
 } = require("../controllers/orderController");
 const { protect } = require("../middleware/authMiddleware");
+const deliveryChargeController = require("../controllers/deliveryChargeController");
 
 // Public routes
 router.post("/", createOrder);
@@ -289,5 +290,22 @@ router.put("/:id/payment", protect, updatePaymentStatus);
 router.post("/:id/send-email", protect, sendManualOrderEmail);
 
 router.get("/phone/:phone", getOrdersByPhone);
+
+// Delivery Charge Routes
+router.get("/delivery-charges", deliveryChargeController.getDeliveryCharges);
+router.get(
+  "/delivery-charge/active",
+  deliveryChargeController.getActiveDeliveryCharge,
+);
+router.post(
+  "/delivery-charges",
+  protect,
+  deliveryChargeController.updateDeliveryCharge,
+);
+router.delete(
+  "/delivery-charges/:id",
+  protect,
+  deliveryChargeController.deleteDeliveryCharge,
+);
 
 module.exports = router;
