@@ -13,7 +13,7 @@ router.get("/", getDeliveryCharges);
 router.get("/active", getActiveDeliveryCharge);
 
 // Admin only routes
-router.post("/", protect, updateDeliveryCharge);
+router.post("/", updateDeliveryCharge);
 router.delete("/:id", protect, deleteDeliveryCharge);
 
 module.exports = router;
