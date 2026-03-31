@@ -13,6 +13,7 @@ const productRoutes = require("./routes/productRoutes");
 const bannerRoutes = require("./routes/bannerRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
+const deliveryChargeRoutes = require("./routes/deliveryChargeRoutes");
 
 const app = express();
 
@@ -121,6 +122,16 @@ app.use("/api/products", productRoutes);
 app.use("/api/banners", bannerRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/delivery-charges", deliveryChargeRoutes);
+// Add this after all app.use() statements
+console.log("✅ Routes registered:");
+console.log("  - /api/auth");
+console.log("  - /api/categories");
+console.log("  - /api/products");
+console.log("  - /api/banners");
+console.log("  - /api/orders");
+console.log("  - /api/dashboard");
+console.log("  - /api/delivery-charges"); // Should see this in logs
 
 // Health check
 app.get("/health", (req, res) => {
