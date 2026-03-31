@@ -1,137 +1,129 @@
 // utils/emailService.js
-// Provider: Gmail SMTP port 465 (SSL) — IPv4 forced for Render compatibility
+// Production-safe, non-blocking, fail-tolerant email service
 
 const nodemailer = require("nodemailer");
 const dns = require("dns").promises;
 
 let transporter = null;
-let verified = false;
-let verifying = null;
+let isInitializing = false;
 
 /**
- * Resolve smtp.gmail.com to an IPv4 address to bypass Render's IPv6 issue.
+ * Resolve smtp.gmail.com to IPv4 (Render fix)
  */
 const resolveIPv4 = async (hostname) => {
   try {
     const addresses = await dns.resolve4(hostname);
-    if (addresses && addresses.length > 0) {
+    if (addresses?.length) {
       console.log(`🔍 Resolved ${hostname} → ${addresses[0]} (IPv4)`);
       return addresses[0];
     }
   } catch (err) {
-    console.warn(`⚠️ IPv4 DNS resolve failed for ${hostname}:`, err.message);
+    console.warn(`⚠️ DNS resolve failed for ${hostname}:`, err.message);
   }
-  return hostname; // fallback to hostname if resolve fails
+  return hostname;
 };
 
+/**
+ * Initialize transporter (SAFE)
+ */
 const initTransporter = async () => {
-  if (transporter && verified) return transporter;
-  if (verifying) return verifying;
+  if (transporter) return transporter;
+  if (isInitializing) return null;
 
-  verifying = (async () => {
+  isInitializing = true;
+
+  try {
     const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
 
     if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
-      throw new Error(
-        "Email not configured: Missing EMAIL_HOST, EMAIL_USER, or EMAIL_PASS"
-      );
+      console.warn("⚠️ Email not configured. Skipping transporter.");
+      return null;
     }
 
-    const port   = parseInt(EMAIL_PORT || "465", 10);
-    const secure = port === 465;
-
-    // ✅ Resolve to IPv4 first — avoids ENETUNREACH on Render
+    const port = parseInt(EMAIL_PORT || "465", 10);
     const resolvedHost = await resolveIPv4(EMAIL_HOST);
 
-    const t = nodemailer.createTransport({
-      host:   resolvedHost,   // IPv4 address e.g. 74.125.x.x
+    transporter = nodemailer.createTransport({
+      host: resolvedHost,
       port,
-      secure,
+      secure: port === 465,
       auth: {
         user: EMAIL_USER,
         pass: EMAIL_PASS,
       },
-      // ✅ Must set servername for TLS since we're using IP not hostname
       tls: {
-        servername: EMAIL_HOST, // smtp.gmail.com — for cert validation
+        servername: EMAIL_HOST,
         rejectUnauthorized: true,
       },
-      family: 4,              // extra safety: socket IPv4 only
-      connectionTimeout: 15000,
-      greetingTimeout:   10000,
-      socketTimeout:     20000,
+      family: 4,
+      connectionTimeout: 10000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
     });
 
-    await new Promise((resolve, reject) => {
-      t.verify((err) => (err ? reject(err) : resolve()));
-    });
+    // ❌ REMOVE verify() in production (causes timeout crashes)
+    console.log(`✅ Email transporter ready (${resolvedHost}:${port})`);
 
-    console.log(`✅ Gmail SMTP verified → ${resolvedHost}:${port} (SSL, IPv4)`);
-    transporter = t;
-    verified    = true;
     return transporter;
-  })()
-    .catch((err) => {
-      console.error("❌ Email transporter init failed:", err.message);
-      transporter = null;
-      verified    = false;
-      verifying   = null;
-      throw err;
-    })
-    .finally(() => {
-      verifying = null;
-    });
-
-  return verifying;
+  } catch (err) {
+    console.error("❌ Transporter init error:", err.message);
+    transporter = null;
+    return null; // ✅ DO NOT THROW
+  } finally {
+    isInitializing = false;
+  }
 };
 
-// Warm up on module load (non-blocking)
-if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  initTransporter().catch(() => {});
-}
-
+/**
+ * Send email (SAFE - never crashes app)
+ */
 const sendEmail = async (to, subject, html) => {
   if (process.env.DISABLE_EMAIL === "true") {
-    console.log("📧 Email disabled (DISABLE_EMAIL=true)");
-    return { success: true, message: "Email disabled" };
+    console.log("📧 Email disabled");
+    return { success: true };
   }
 
   try {
-    const t = await initTransporter();
-    const from = `"Beeyond Harvest 🌾" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`;
+    let t = transporter || (await initTransporter());
 
-    console.log(`📧 Sending email → ${to} | "${subject}"`);
-    const info = await t.sendMail({ from, to, subject, html });
-    console.log(`✅ Email sent → ${to} | messageId: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
-
-  } catch (err) {
-    console.error(`❌ Failed to send email → ${to}:`, err.message);
-
-    if (["EAUTH", "ECONNECTION", "ETIMEDOUT", "ESOCKET", "ENETUNREACH"].includes(err.code)) {
-      console.log("🔄 Resetting transporter for next attempt...");
-      transporter = null;
-      verified    = false;
-      verifying   = null;
+    if (!t) {
+      console.warn("⚠️ Email transporter unavailable");
+      return { success: false, error: "Email not available" };
     }
 
-    return { success: false, error: err.message, code: err.code };
+    const from = `"Beeyond Harvest 🌾" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`;
+
+    console.log(`📧 Sending → ${to}`);
+    const info = await t.sendMail({ from, to, subject, html });
+
+    console.log(`✅ Sent → ${to}`);
+    return { success: true, messageId: info.messageId };
+  } catch (err) {
+    console.error(`❌ Email failed → ${to}:`, err.message);
+
+    // 🔄 Reset on network errors
+    if (
+      ["EAUTH", "ECONNECTION", "ETIMEDOUT", "ESOCKET", "ENETUNREACH"].includes(
+        err.code,
+      )
+    ) {
+      console.log("🔄 Resetting transporter...");
+      transporter = null;
+    }
+
+    return { success: false, error: err.message };
   }
 };
 
-const testEmailService = async (testTo) => {
-  const to = testTo || process.env.EMAIL_USER;
-  console.log(`🧪 Sending test email → ${to}`);
-  const result = await sendEmail(
-    to,
-    "🧪 Beeyond Harvest — Email Test",
-    `<p style="font-family:sans-serif">
-       ✅ Email service is working!<br/>
-       <strong>Sent at:</strong> ${new Date().toLocaleString()}
-     </p>`
+/**
+ * Optional test
+ */
+const testEmailService = async (to) => {
+  return sendEmail(
+    to || process.env.EMAIL_USER,
+    "Test Email",
+    `<p>✅ Email working at ${new Date().toLocaleString()}</p>`,
   );
-  console.log(result.success ? "🎉 Test PASSED" : "❌ Test FAILED", result);
-  return result;
 };
 
 module.exports = { sendEmail, testEmailService };
