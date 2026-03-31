@@ -1,237 +1,139 @@
 // utils/emailService.js
-// Provider: Brevo (formerly Sendinblue) — 300 emails/day free
+// Provider: Gmail SMTP port 465 (SSL) — works on Render (port 587 is blocked)
 
 const nodemailer = require("nodemailer");
-const dotenv = require("dotenv");
-dotenv.config();
 
 let transporter = null;
-let isInitialized = false;
-let initializationPromise = null;
+let verified = false;
+let verifying = null; // Promise lock to prevent concurrent init
 
-const initializeTransporter = async () => {
-  if (isInitialized && transporter) return transporter;
-  if (initializationPromise) return initializationPromise;
+/**
+ * Build + verify the transporter exactly once.
+ * Returns the transporter on success, throws on failure.
+ */
+const initTransporter = async () => {
+  // Already good — return immediately
+  if (transporter && verified) return transporter;
 
-  initializationPromise = (async () => {
-    console.log("📧 Initializing Brevo email service...");
+  // Another call is already initializing — wait for it
+  if (verifying) return verifying;
 
-    // Check credentials
-    if (!process.env.BREVO_USER || !process.env.BREVO_PASS) {
-      const error =
-        "❌ Brevo credentials missing! Set BREVO_USER and BREVO_PASS in environment variables";
-      console.error(error);
-      throw new Error(error);
+  verifying = (async () => {
+    const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
+
+    if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
+      throw new Error(
+        "Email not configured: Missing EMAIL_HOST, EMAIL_USER, or EMAIL_PASS",
+      );
     }
 
-    try {
-      // Create transporter with detailed configuration
-      transporter = nodemailer.createTransport({
-        host: "smtp-relay.brevo.com",
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.BREVO_USER,
-          pass: process.env.BREVO_PASS,
-        },
-        connectionTimeout: 15000,
-        greetingTimeout: 10000,
-        socketTimeout: 20000,
-        logger: false,
-        debug: false,
-        // Important: Disable TLS for Brevo
-        tls: {
-          rejectUnauthorized: false,
-        },
-      });
+    const port = parseInt(EMAIL_PORT || "465", 10);
+    const secure = port === 465;
 
-      console.log("🔐 Verifying Brevo SMTP connection...");
+    const t = nodemailer.createTransport({
+      host: EMAIL_HOST, // smtp.gmail.com
+      port, // 465
+      secure, // true → SSL (not STARTTLS)
+      auth: {
+        user: EMAIL_USER, // ytvech@gmail.com
+        pass: EMAIL_PASS, // 16-char Gmail App Password
+      },
+      tls: { rejectUnauthorized: true },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+    });
 
-      // Verify connection with timeout
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error("SMTP verification timeout (15s)"));
-        }, 15000);
+    // Await verify properly — no callback race
+    await new Promise((resolve, reject) => {
+      t.verify((err) => (err ? reject(err) : resolve()));
+    });
 
-        transporter.verify((error, success) => {
-          clearTimeout(timeout);
-          if (error) {
-            console.error("❌ Brevo SMTP verification failed:", error.message);
-            reject(error);
-          } else {
-            console.log("✅ Brevo SMTP connection verified successfully");
-            resolve(success);
-          }
-        });
-      });
-
-      isInitialized = true;
-      console.log("🚀 Brevo email service ready - 300 emails/day free tier");
-      return transporter;
-    } catch (error) {
-      console.error(
-        "❌ Failed to initialize Brevo email service:",
-        error.message,
-      );
-      console.log("\n🔧 Troubleshooting tips:");
-      console.log(
-        "1. Check Brevo SMTP credentials at: https://app.brevo.com/settings/keys/smtp",
-      );
-      console.log("2. Verify your sender email is confirmed in Brevo");
-      console.log("3. Check if port 587 is blocked by your hosting provider");
-      console.log("4. Try using Brevo API instead of SMTP if issues persist");
-
+    console.log(`✅ Gmail SMTP verified on port ${port} (SSL)`);
+    transporter = t;
+    verified = true;
+    return transporter;
+  })()
+    .catch((err) => {
+      // Reset everything so the next sendEmail call retries from scratch
+      console.error("❌ Email transporter init failed:", err.message);
       transporter = null;
-      isInitialized = false;
-      initializationPromise = null;
-      throw error;
-    }
-  })();
+      verified = false;
+      verifying = null;
+      throw err;
+    })
+    .finally(() => {
+      // Clear the lock whether we succeeded or failed
+      verifying = null;
+    });
 
-  return initializationPromise;
+  return verifying;
 };
 
+// Warm up on module load (non-blocking — errors are swallowed here,
+// sendEmail will retry if needed)
+if (
+  process.env.EMAIL_HOST &&
+  process.env.EMAIL_USER &&
+  process.env.EMAIL_PASS
+) {
+  initTransporter().catch(() => {});
+}
+
+/**
+ * Send an email.
+ * @param {string} to
+ * @param {string} subject
+ * @param {string} html
+ * @returns {{ success: boolean, messageId?: string, error?: string }}
+ */
 const sendEmail = async (to, subject, html) => {
-  // Check if email is disabled
   if (process.env.DISABLE_EMAIL === "true") {
-    console.log("📧 Email disabled by DISABLE_EMAIL flag");
+    console.log("📧 Email disabled (DISABLE_EMAIL=true)");
     return { success: true, message: "Email disabled" };
   }
 
-  // Check credentials first
-  if (!process.env.BREVO_USER || !process.env.BREVO_PASS) {
-    const errorMsg = "Email service unavailable - Brevo credentials missing";
-    console.error("❌ " + errorMsg);
-    return {
-      success: false,
-      error: errorMsg,
-      details: "Set BREVO_USER and BREVO_PASS environment variables",
-    };
-  }
-
   try {
-    // Ensure transporter is initialized
-    if (!transporter || !isInitialized) {
-      console.log("🔄 Initializing email transporter...");
-      await initializeTransporter();
-    }
+    const t = await initTransporter(); // always await — safe if already verified
 
-    const senderEmail = process.env.BREVO_USER;
-    const fromEmail = `"Beeyond Harvest 🌾" <${senderEmail}>`;
+    const from = `"Beeyond Harvest 🌾" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`;
 
-    console.log(`📧 Attempting to send email to: ${to}`);
+    console.log(`📧 Sending email → ${to} | "${subject}"`);
+    const info = await t.sendMail({ from, to, subject, html });
+    console.log(`✅ Email sent → ${to} | messageId: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  } catch (err) {
+    console.error(`❌ Failed to send email → ${to}:`, err.message);
 
-    const mailOptions = {
-      from: fromEmail,
-      to: to,
-      subject: subject,
-      html: html,
-      // Add headers for better deliverability
-      headers: {
-        "X-Mailer": "Beeyond Harvest",
-        "X-Priority": "3",
-      },
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-
-    console.log(`✅ Email sent successfully to ${to}`);
-    console.log(`   Message ID: ${info.messageId}`);
-    console.log(`   Response: ${info.response}`);
-
-    return {
-      success: true,
-      messageId: info.messageId,
-      response: info.response,
-    };
-  } catch (error) {
-    console.error(`❌ Failed to send email to ${to}:`, error.message);
-
-    // Reset on specific errors to force re-initialization
-    if (
-      error.code === "EAUTH" ||
-      error.code === "ECONNECTION" ||
-      error.code === "ETIMEDOUT"
-    ) {
-      console.log("🔄 Resetting transporter due to connection error...");
+    // Force re-init on next attempt for connection/auth errors
+    if (["EAUTH", "ECONNECTION", "ETIMEDOUT", "ESOCKET"].includes(err.code)) {
+      console.log("🔄 Resetting transporter for next attempt...");
       transporter = null;
-      isInitialized = false;
-      initializationPromise = null;
+      verified = false;
+      verifying = null;
     }
 
-    return {
-      success: false,
-      error: error.message,
-      code: error.code,
-      details: "Check Brevo SMTP configuration",
-    };
+    return { success: false, error: err.message, code: err.code };
   }
 };
 
-// Test function with detailed diagnostics
-const testEmailService = async (testEmail = null) => {
-  console.log("🧪 Starting comprehensive email service test...");
-
-  // Check environment variables
-  console.log("🔍 Checking environment variables...");
-  if (!process.env.BREVO_USER || !process.env.BREVO_PASS) {
-    console.error("❌ Missing BREVO_USER or BREVO_PASS environment variables");
-    console.log("💡 Set them in your .env file:");
-    console.log("   BREVO_USER=your-smtp-login@brevo.com");
-    console.log("   BREVO_PASS=your-smtp-password");
-    return false;
-  }
-
-  console.log("✅ Environment variables found");
-  console.log(`   BREVO_USER: ${process.env.BREVO_USER.substring(0, 5)}...`);
-  console.log(`   BREVO_PASS: ${process.env.BREVO_PASS.substring(0, 5)}...`);
-
-  try {
-    const testTo = testEmail || process.env.BREVO_USER;
-    console.log(`📧 Test email will be sent to: ${testTo}`);
-
-    const testResult = await sendEmail(
-      testTo,
-      "🧪 Beeyond Harvest - Email Service Test",
-      `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #4CAF50;">✅ Email Service Test</h2>
-        <p>If you're reading this, your Beeyond Harvest email service is working correctly!</p>
-        <p><strong>Test Time:</strong> ${new Date().toLocaleString()}</p>
-        <p><strong>Sender:</strong> ${process.env.BREVO_USER}</p>
-        <p><strong>Recipient:</strong> ${testTo}</p>
-        <hr>
-        <p style="color: #666; font-size: 12px;">
-          This is an automated test from your application.
-        </p>
-      </div>
-      `,
-    );
-
-    if (testResult.success) {
-      console.log("🎉 Email service test PASSED!");
-      console.log("   Email should arrive in the recipient's inbox shortly");
-      return true;
-    } else {
-      console.error("❌ Email service test FAILED");
-      console.error("   Error:", testResult.error);
-      if (testResult.details) {
-        console.error("   Details:", testResult.details);
-      }
-      return false;
-    }
-  } catch (error) {
-    console.error("💥 Test crashed:", error.message);
-    return false;
-  }
-};
-
-// Initialize on require (optional)
-console.log("📧 Email service module loaded");
-if (process.env.BREVO_USER && process.env.BREVO_PASS) {
-  console.log(
-    "🔧 Email credentials detected - transporter will initialize on first use",
+/**
+ * Quick smoke-test. Call from a temp route and remove after confirming.
+ * GET /api/orders/test-email
+ */
+const testEmailService = async (testTo) => {
+  const to = testTo || process.env.EMAIL_USER;
+  console.log(`🧪 Sending test email → ${to}`);
+  const result = await sendEmail(
+    to,
+    "🧪 Beeyond Harvest — Email Test",
+    `<p style="font-family:sans-serif">
+       ✅ Email service is working!<br/>
+       <strong>Sent at:</strong> ${new Date().toLocaleString()}
+     </p>`,
   );
-}
+  console.log(result.success ? "🎉 Test PASSED" : "❌ Test FAILED", result);
+  return result;
+};
 
-module.exports = { sendEmail, testEmailService, initializeTransporter };
+module.exports = { sendEmail, testEmailService };
