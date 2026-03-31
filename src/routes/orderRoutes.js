@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order"); // ← ADD THIS
+const Product = require("../models/Product");
 const {
   createOrder,
   getOrders,
@@ -73,6 +74,180 @@ router.get("/track/:orderNumber", async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+// ─── LOAD TEST ROUTE (remove in production) ───────────────────────────────────
+// POST /api/orders/load-test
+// Body: { count: 10, sendEmails: false }
+router.post("/load-test", async (req, res) => {
+  const { count = 10, sendEmails = false } = req.body;
+
+  if (count > 1000) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Max 1000 orders per test" });
+  }
+
+  const startTime = Date.now();
+  const results = { created: 0, failed: 0, errors: [] };
+
+  // ── Fake product pool (uses your real products from DB) ──────────────────────
+  const products = await Product.find({ stock: { $gt: 10 } })
+    .limit(10)
+    .lean();
+  if (!products.length) {
+    return res.status(400).json({
+      success: false,
+      message: "No products with stock > 10 found. Add products first.",
+    });
+  }
+
+  // ── Bangladeshi fake data pools ───────────────────────────────────────────────
+  const firstNames = [
+    "Rahim",
+    "Karim",
+    "Jamal",
+    "Sohel",
+    "Rafi",
+    "Nadia",
+    "Mitu",
+    "Puja",
+    "Tania",
+    "Riya",
+  ];
+  const lastNames = [
+    "Hossain",
+    "Islam",
+    "Ahmed",
+    "Khan",
+    "Begum",
+    "Akter",
+    "Mia",
+    "Chowdhury",
+    "Paul",
+    "Das",
+  ];
+  const areas = [
+    "Mirpur",
+    "Dhanmondi",
+    "Gulshan",
+    "Uttara",
+    "Mohammadpur",
+    "Banani",
+    "Motijheel",
+    "Wari",
+  ];
+  const cities = ["Dhaka", "Chittagong", "Sylhet", "Rajshahi", "Khulna"];
+  const methods = ["cash_on_delivery", "bkash", "nagad"];
+
+  const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const randInt = (min, max) =>
+    Math.floor(Math.random() * (max - min + 1)) + min;
+  const randPhone = () =>
+    `01${randInt(3, 9)}${String(randInt(10000000, 99999999))}`;
+
+  // ── Generate orders in batches of 50 to avoid overwhelming DB ────────────────
+  const BATCH_SIZE = 50;
+  const orders = [];
+
+  for (let i = 0; i < count; i++) {
+    const firstName = rand(firstNames);
+    const lastName = rand(lastNames);
+    const name = `${firstName} ${lastName}`;
+    const email = `test.${firstName.toLowerCase()}${randInt(1, 999)}@loadtest.com`;
+    const phone = randPhone();
+
+    // Pick 1-3 random products
+    const itemCount = randInt(1, Math.min(3, products.length));
+    const shuffled = [...products]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, itemCount);
+    const items = shuffled.map((p) => ({
+      product: p._id,
+      name: p.name,
+      sku: p.sku || "N/A",
+      quantity: randInt(1, 3),
+      price: p.price,
+      total: p.price * randInt(1, 3),
+    }));
+    // Recalculate totals properly
+    items.forEach((item) => {
+      item.total = item.price * item.quantity;
+    });
+    const subtotal = items.reduce((s, i) => s + i.total, 0);
+    const deliveryCharge = rand([0, 60, 80, 100]);
+    const total = subtotal + deliveryCharge;
+
+    orders.push({
+      customer: {
+        name,
+        email,
+        phone,
+        address: {
+          street: `${randInt(1, 99)} ${rand(areas)} Road`,
+          area: rand(areas),
+          city: rand(cities),
+          district: rand(cities),
+          division: rand(cities),
+        },
+      },
+      items,
+      subtotal,
+      deliveryCharge,
+      total,
+      paymentMethod: rand(methods),
+      paymentStatus: "pending",
+      orderStatus: rand(["pending", "confirmed", "processing"]),
+    });
+  }
+
+  // ── Insert in batches ─────────────────────────────────────────────────────────
+  for (let b = 0; b < orders.length; b += BATCH_SIZE) {
+    const batch = orders.slice(b, b + BATCH_SIZE);
+    try {
+      await Order.insertMany(batch, { ordered: false }); // ordered:false = don't stop on error
+      results.created += batch.length;
+    } catch (err) {
+      // insertMany with ordered:false reports partial success
+      const inserted = err.result?.nInserted || 0;
+      results.created += inserted;
+      results.failed += batch.length - inserted;
+      results.errors.push(err.message.slice(0, 100));
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+
+  console.log(
+    `🧪 [LOAD TEST] ${results.created}/${count} orders created in ${elapsed}s`,
+  );
+
+  res.json({
+    success: true,
+    summary: {
+      requested: count,
+      created: results.created,
+      failed: results.failed,
+      duration: `${elapsed}s`,
+      rate: `${(results.created / elapsed).toFixed(0)} orders/sec`,
+      emailsSent: sendEmails,
+    },
+    errors: results.errors.length ? results.errors : undefined,
+    tip: "Refresh your admin orders panel to see the test orders. Filter by 'load test' emails to clean up.",
+  });
+});
+
+// DELETE /api/orders/load-test/cleanup — remove all load test orders
+router.delete("/load-test/cleanup", protect, async (req, res) => {
+  try {
+    const result = await Order.deleteMany({
+      "customer.email": { $regex: /@loadtest\.com$/i },
+    });
+    console.log(`🧹 [CLEANUP] Deleted ${result.deletedCount} test orders`);
+    res.json({ success: true, deleted: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Private routes (admin only)
 router.get("/", protect, getOrders);
 router.get("/stats", protect, getOrderStats);
