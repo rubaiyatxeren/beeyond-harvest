@@ -23,6 +23,8 @@ exports.getActiveDeliveryCharge = async (req, res) => {
     const { city, subtotal } = req.query;
     const orderAmount = parseFloat(subtotal) || 0;
 
+    console.log(`Order amount: ${orderAmount}, City: ${city}`);
+
     // Get all active delivery charges
     const allCharges = await DeliveryCharge.find({ isActive: true });
     console.log(`Found ${allCharges.length} active charges`);
@@ -30,48 +32,78 @@ exports.getActiveDeliveryCharge = async (req, res) => {
     // Log all charges for debugging
     console.log("Available charges:");
     allCharges.forEach((charge) => {
-      console.log(`  - ${charge.name}: ৳${charge.amount} (ID: ${charge._id})`);
+      console.log(
+        `  - ${charge.name}: ৳${charge.amount} (min: ${charge.minOrderAmount})`,
+      );
     });
 
-    let selectedCharge = null;
+    let standardCharge = null;
+    let specialCharge = null;
 
-    // ✅ CORRECT LOGIC: Only use inside_dhaka for Dhaka city
+    // STEP 1: Get the standard charge based on city
     if (city && city.toLowerCase() === "dhaka") {
       // Inside Dhaka - use inside_dhaka charge
-      selectedCharge = allCharges.find((c) => c.name === "inside_dhaka");
-      console.log(`📍 Inside Dhaka detected, looking for inside_dhaka charge`);
+      standardCharge = allCharges.find((c) => c.name === "inside_dhaka");
+      console.log(
+        `📍 Dhaka detected - standard charge: ${standardCharge?.amount || 60}`,
+      );
     } else if (city) {
       // Outside Dhaka - use outside_dhaka charge
-      selectedCharge = allCharges.find((c) => c.name === "outside_dhaka");
+      standardCharge = allCharges.find((c) => c.name === "outside_dhaka");
       console.log(
-        `📍 Outside Dhaka detected (${city}), looking for outside_dhaka charge`,
+        `📍 Outside Dhaka (${city}) - standard charge: ${standardCharge?.amount || 120}`,
       );
     }
 
-    // If no specific charge found, use default
-    if (!selectedCharge) {
-      selectedCharge = allCharges.find((c) => c.name === "default");
-      console.log("⚠️ Using default charge");
-    }
-
-    // If still no charge, use fallback
-    if (!selectedCharge) {
-      console.log("⚠️ No charges found, using fallback 60");
-      return res.json({
-        success: true,
-        data: { amount: 60, name: "fallback" },
-      });
-    }
-
+    // STEP 2: Get special default charge (if applicable)
+    specialCharge = allCharges.find((c) => c.name === "default");
     console.log(
-      `✅ Selected charge: ${selectedCharge.name} - ৳${selectedCharge.amount}`,
+      `💰 Special default charge: ${specialCharge?.amount || 0} (min: ${specialCharge?.minOrderAmount || 0})`,
     );
+
+    // STEP 3: Determine which charge to apply
+    let finalAmount = null;
+    let selectedCharge = null;
+
+    // If special charge exists and order amount meets minimum requirement
+    if (specialCharge && orderAmount >= specialCharge.minOrderAmount) {
+      finalAmount = specialCharge.amount;
+      selectedCharge = specialCharge;
+      console.log(
+        `✅ Order amount ${orderAmount} >= ${specialCharge.minOrderAmount}, applying special charge: ৳${finalAmount}`,
+      );
+    }
+    // Otherwise, use standard charge
+    else if (standardCharge) {
+      finalAmount = standardCharge.amount;
+      selectedCharge = standardCharge;
+      console.log(`✅ Using standard charge: ৳${finalAmount}`);
+    }
+    // Fallback if no charges found
+    else {
+      // Determine fallback based on city
+      if (city && city.toLowerCase() === "dhaka") {
+        finalAmount = 60;
+        console.log(`⚠️ No charges found, using fallback 60 for Dhaka`);
+      } else if (city) {
+        finalAmount = 120;
+        console.log(
+          `⚠️ No charges found, using fallback 120 for outside Dhaka`,
+        );
+      } else {
+        finalAmount = 60;
+        console.log(`⚠️ No charges found, using fallback 60`);
+      }
+      selectedCharge = { name: "fallback", amount: finalAmount };
+    }
+
+    console.log(`🎯 Final charge: ${selectedCharge.name} - ৳${finalAmount}`);
     res.json({
       success: true,
       data: {
-        amount: selectedCharge.amount,
+        amount: finalAmount,
         name: selectedCharge.name,
-        minOrderAmount: selectedCharge.minOrderAmount,
+        minOrderAmount: selectedCharge.minOrderAmount || 0,
       },
     });
   } catch (error) {
