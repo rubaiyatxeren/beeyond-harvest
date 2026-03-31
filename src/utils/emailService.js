@@ -1,13 +1,28 @@
 // utils/emailService.js
-const nodemailer = require("nodemailer");
-const dns = require("dns");
+// Provider: Gmail SMTP port 465 (SSL) — IPv4 forced for Render compatibility
 
-// ✅ Force IPv4 — Render doesn't support IPv6 outbound (ENETUNREACH fix)
-dns.setDefaultResultOrder("ipv4first");
+const nodemailer = require("nodemailer");
+const dns = require("dns").promises;
 
 let transporter = null;
 let verified = false;
 let verifying = null;
+
+/**
+ * Resolve smtp.gmail.com to an IPv4 address to bypass Render's IPv6 issue.
+ */
+const resolveIPv4 = async (hostname) => {
+  try {
+    const addresses = await dns.resolve4(hostname);
+    if (addresses && addresses.length > 0) {
+      console.log(`🔍 Resolved ${hostname} → ${addresses[0]} (IPv4)`);
+      return addresses[0];
+    }
+  } catch (err) {
+    console.warn(`⚠️ IPv4 DNS resolve failed for ${hostname}:`, err.message);
+  }
+  return hostname; // fallback to hostname if resolve fails
+};
 
 const initTransporter = async () => {
   if (transporter && verified) return transporter;
@@ -25,17 +40,23 @@ const initTransporter = async () => {
     const port   = parseInt(EMAIL_PORT || "465", 10);
     const secure = port === 465;
 
+    // ✅ Resolve to IPv4 first — avoids ENETUNREACH on Render
+    const resolvedHost = await resolveIPv4(EMAIL_HOST);
+
     const t = nodemailer.createTransport({
-      host:   EMAIL_HOST,
+      host:   resolvedHost,   // IPv4 address e.g. 74.125.x.x
       port,
       secure,
       auth: {
         user: EMAIL_USER,
         pass: EMAIL_PASS,
       },
-      // ✅ Force IPv4 at socket level too
-      family: 4,
-      tls: { rejectUnauthorized: true },
+      // ✅ Must set servername for TLS since we're using IP not hostname
+      tls: {
+        servername: EMAIL_HOST, // smtp.gmail.com — for cert validation
+        rejectUnauthorized: true,
+      },
+      family: 4,              // extra safety: socket IPv4 only
       connectionTimeout: 15000,
       greetingTimeout:   10000,
       socketTimeout:     20000,
@@ -45,7 +66,7 @@ const initTransporter = async () => {
       t.verify((err) => (err ? reject(err) : resolve()));
     });
 
-    console.log(`✅ Gmail SMTP verified on port ${port} (SSL, IPv4)`);
+    console.log(`✅ Gmail SMTP verified → ${resolvedHost}:${port} (SSL, IPv4)`);
     transporter = t;
     verified    = true;
     return transporter;
@@ -64,7 +85,7 @@ const initTransporter = async () => {
   return verifying;
 };
 
-// Warm up on module load
+// Warm up on module load (non-blocking)
 if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
   initTransporter().catch(() => {});
 }
