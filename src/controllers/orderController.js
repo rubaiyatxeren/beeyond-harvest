@@ -7,273 +7,99 @@ const { sendEmail } = require("../utils/emailService");
 const generateOrderEmailTemplate = (order, type = "new_order") => {
   const isNewOrder = type === "new_order";
   const title = isNewOrder
-    ? "Order Confirmed - Beeyond Harvest"
-    : "Order Update - Beeyond Harvest";
+    ? "🎉 New Order Received!"
+    : "📦 Order Status Update";
   const message = isNewOrder
-    ? "Thank you for choosing Beeyond Harvest. Your order has been received and is being prepared with care."
-    : `Your order status has been updated to <strong>${order.orderStatus.toUpperCase()}</strong>.`;
-
-  const statusConfig = {
-    delivered: { bg: "#E8F5E9", text: "#2E7D32", border: "#A5D6A7" },
-    cancelled: { bg: "#FFEBEE", text: "#C62828", border: "#FFCDD2" },
-    pending: { bg: "#FFF3E0", text: "#EF6C00", border: "#FFE0B2" },
-    processing: { bg: "#E3F2FD", text: "#1565C0", border: "#BBDEFB" },
-    shipped: { bg: "#F3E5F5", text: "#7B1FA2", border: "#E1BEE7" },
-  };
-
-  const status = statusConfig[order.orderStatus] || statusConfig.pending;
+    ? "Thank you for your order! We'll process it shortly."
+    : `Your order status has been updated to: ${order.orderStatus.toUpperCase()}`;
 
   const itemsHtml = order.items
     .map(
       (item) => `
-        <tr>
-          <td style="padding: 16px 0; border-bottom: 1px solid #F0F0F0;">
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" />` : '<div style="width: 48px; height: 48px; background: #F5F5F5; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 24px;">🍽️</div>'}
-              <div style="flex: 1;">
-                <div style="font-weight: 600; color: #1A1A1A; margin-bottom: 4px;">${item.name}</div>
-                <div style="font-size: 13px; color: #666;">${item.price.toLocaleString()} ৳ each</div>
-              </div>
-            </div>
-          </td>
-          <td style="padding: 16px 0; border-bottom: 1px solid #F0F0F0; text-align: center; font-weight: 500;">×${item.quantity}</td>
-          <td style="padding: 16px 0; border-bottom: 1px solid #F0F0F0; text-align: right; font-weight: 700; color: #1A1A1A;">${item.total.toLocaleString()} ৳</td>
-        </tr>
-      `,
+    <tr style="border-bottom: 1px solid #e5e7eb;">
+      <td style="padding: 12px; text-align: left;">${item.name}</td>
+      <td style="padding: 12px; text-align: center;">${item.quantity}</td>
+      <td style="padding: 12px; text-align: right;">${item.price.toLocaleString()} ৳</td>
+      <td style="padding: 12px; text-align: right;">${item.total.toLocaleString()} ৳</td>
+    </tr>`,
     )
     .join("");
 
+  const statusColor =
+    order.orderStatus === "delivered"
+      ? "#10b981"
+      : order.orderStatus === "cancelled"
+        ? "#ef4444"
+        : "#f59e0b";
+
   return `<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>${title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} - Beeyond Harvest</title>
   <style>
-    /* Modern reset and base styles */
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-      background-color: #F5F7F5;
-      margin: 0;
-      padding: 20px;
-      line-height: 1.6;
-      color: #1A1A1A;
-    }
-    
-    /* Responsive container */
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-      background-color: #FFFFFF;
-      border-radius: 24px;
-      overflow: hidden;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-    }
-    
-    /* Mobile-first responsive design */
-    @media only screen and (max-width: 600px) {
-      body {
-        padding: 10px;
-      }
-      .container {
-        border-radius: 16px;
-      }
-    }
-    
-    /* Typography */
-    h1, h2, h3 {
-      font-weight: 700;
-      line-height: 1.3;
-    }
-    
-    /* Button styles */
-    .btn {
-      display: inline-block;
-      padding: 14px 32px;
-      background: linear-gradient(135deg, #2E7D32 0%, #4CAF50 100%);
-      color: #FFFFFF;
-      text-decoration: none;
-      border-radius: 12px;
-      font-weight: 600;
-      text-align: center;
-      transition: transform 0.2s ease;
-    }
-    
-    .btn:hover {
-      transform: translateY(-2px);
-    }
-    
-    /* Responsive table */
-    .responsive-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    
-    @media only screen and (max-width: 480px) {
-      .responsive-table thead {
-        display: none;
-      }
-      .responsive-table tbody tr {
-        display: block;
-        margin-bottom: 20px;
-        border: 1px solid #E0E0E0;
-        border-radius: 12px;
-        padding: 16px;
-      }
-      .responsive-table tbody td {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 0;
-        border: none;
-      }
-      .responsive-table tbody td:before {
-        content: attr(data-label);
-        font-weight: 600;
-        color: #666;
-      }
-    }
-    
-    /* Utility classes */
-    .text-center { text-align: center; }
-    .text-right { text-align: right; }
-    .mt-20 { margin-top: 20px; }
-    .mb-20 { margin-bottom: 20px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f5f7fa; margin: 0; padding: 20px; }
+    .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 35px -10px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 24px; text-align: center; }
+    .header h1 { color: white; margin: 0; font-size: 28px; font-weight: 700; }
+    .header p { color: rgba(255,255,255,0.9); margin: 8px 0 0; font-size: 14px; }
+    .content { padding: 32px 24px; }
+    .order-info { background: #f9fafb; border-radius: 16px; padding: 20px; margin-bottom: 24px; }
+    .order-info h3 { margin: 0 0 12px 0; color: #1f2937; font-size: 16px; font-weight: 600; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .info-item { font-size: 14px; }
+    .info-label { color: #6b7280; font-weight: 500; margin-bottom: 4px; }
+    .info-value { color: #1f2937; font-weight: 600; }
+    .status-badge { display: inline-block; padding: 6px 12px; background: ${statusColor}; color: white; border-radius: 100px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th { background: #f3f4f6; padding: 12px; text-align: left; font-weight: 600; color: #374151; }
+    .totals { background: #f9fafb; border-radius: 12px; padding: 16px; margin-top: 20px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 8px 0; }
+    .totals-row.total { border-top: 2px solid #e5e7eb; margin-top: 8px; padding-top: 12px; font-weight: 700; font-size: 18px; color: #667eea; }
+    .footer { background: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; }
+    .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: 600; margin-top: 20px; }
+    @media (max-width: 480px) { .content { padding: 20px; } .info-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="container">
-    <!-- Header Section -->
-    <div style="background: linear-gradient(135deg, #1B5E20 0%, #2E7D32 100%); padding: 48px 32px; text-align: center;">
-      <div style="margin-bottom: 24px;">
-        <span style="font-size: 48px;">🌾</span>
-      </div>
-      <div style="display: inline-block; background: rgba(255,255,255,0.2); padding: 6px 16px; border-radius: 100px; font-size: 12px; font-weight: 600; letter-spacing: 1px; color: #FFFFFF; margin-bottom: 20px;">
-        ${isNewOrder ? "ORDER CONFIRMED" : "ORDER UPDATE"}
-      </div>
-      <h1 style="color: #FFFFFF; font-size: 32px; margin-bottom: 16px;">
-        ${isNewOrder ? "Thank You for Your Order!" : "Your Order Has Been Updated"}
-      </h1>
-      <p style="color: rgba(255,255,255,0.9); font-size: 16px;">${message.replace(/<[^>]*>/g, "")}</p>
+    <div class="header">
+      <h1>🌾 Beeyond Harvest</h1>
+      <p>${isNewOrder ? "New Order Confirmation" : "Order Status Update"}</p>
     </div>
-    
-    <!-- Main Content -->
-    <div style="padding: 40px 32px;">
-      <!-- Greeting -->
-      <div style="margin-bottom: 32px;">
-        <h2 style="font-size: 24px; color: #1A1A1A; margin-bottom: 8px;">Hello, ${order.customer.name}!</h2>
-        <p style="color: #666;">${isNewOrder ? "We're thrilled to confirm your order. Here's everything you need to know:" : "Here's the latest information about your order:"}</p>
-      </div>
-      
-      <!-- Order Status Card -->
-      <div style="background: ${status.bg}; border-left: 4px solid ${status.text}; padding: 20px; border-radius: 12px; margin-bottom: 32px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div>
-            <div style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: ${status.text}; margin-bottom: 4px;">Current Status</div>
-            <div style="font-size: 20px; font-weight: 700; color: ${status.text};">${order.orderStatus.toUpperCase()}</div>
-          </div>
-          <div style="background: ${status.text}; color: white; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 600;">
-            Order #${order.orderNumber}
-          </div>
+    <div class="content">
+      <h2 style="margin: 0 0 8px 0;">${isNewOrder ? "Hello " : "Hi "}${order.customer.name}!</h2>
+      <p style="color: #6b7280; margin-bottom: 24px;">${message}</p>
+      <div class="order-info">
+        <h3>📋 Order Details</h3>
+        <div class="info-grid">
+          <div class="info-item"><div class="info-label">Order Number</div><div class="info-value">${order.orderNumber}</div></div>
+          <div class="info-item"><div class="info-label">Order Date</div><div class="info-value">${new Date(order.createdAt).toLocaleDateString("en-BD", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div></div>
+          <div class="info-item"><div class="info-label">Order Status</div><div class="info-value"><span class="status-badge">${order.orderStatus}</span></div></div>
+          <div class="info-item"><div class="info-label">Payment Method</div><div class="info-value">${order.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : order.paymentMethod}</div></div>
+          <div class="info-item"><div class="info-label">Payment Status</div><div class="info-value">${order.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}</div></div>
+          ${order.trackingNumber ? `<div class="info-item"><div class="info-label">Tracking Number</div><div class="info-value">${order.trackingNumber}</div></div>` : ""}
         </div>
       </div>
-      
-      <!-- Order Details Grid -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 32px;">
-        <div style="background: #F8F9F8; padding: 16px; border-radius: 12px;">
-          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Order Date</div>
-          <div style="font-weight: 600;">${new Date(order.createdAt).toLocaleDateString("en-BD", { year: "numeric", month: "long", day: "numeric" })}</div>
-        </div>
-        <div style="background: #F8F9F8; padding: 16px; border-radius: 12px;">
-          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Payment Method</div>
-          <div style="font-weight: 600;">${order.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : order.paymentMethod}</div>
-        </div>
-        <div style="background: #F8F9F8; padding: 16px; border-radius: 12px;">
-          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Payment Status</div>
-          <div style="font-weight: 600; color: ${order.paymentStatus === "paid" ? "#2E7D32" : "#EF6C00"};">${order.paymentStatus === "paid" ? "✓ Paid" : "Pending"}</div>
-        </div>
-        ${
-          order.trackingNumber
-            ? `
-        <div style="background: #F8F9F8; padding: 16px; border-radius: 12px;">
-          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Tracking Number</div>
-          <div style="font-weight: 600; font-size: 14px;">${order.trackingNumber}</div>
-        </div>
-        `
-            : ""
-        }
+      <h3 style="margin: 24px 0 12px 0;">🛍️ Order Items</h3>
+      <table>
+        <thead><tr><th>Product</th><th style="text-align:center;">Qty</th><th style="text-align:right;">Price</th><th style="text-align:right;">Total</th></tr></thead>
+        <tbody>${itemsHtml}</tbody>
+      </table>
+      <div class="totals">
+        <div class="totals-row"><span>Subtotal:</span><span>${order.subtotal.toLocaleString()} ৳</span></div>
+        <div class="totals-row"><span>Delivery Charge:</span><span>${order.deliveryCharge.toLocaleString()} ৳</span></div>
+        <div class="totals-row total"><span>Total Amount:</span><span>${order.total.toLocaleString()} ৳</span></div>
       </div>
-      
-      <!-- Shipping Address -->
-      <div style="background: #F8F9F8; padding: 20px; border-radius: 12px; margin-bottom: 32px;">
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-          <span style="font-size: 20px;">📍</span>
-          <h3 style="font-size: 16px;">Shipping Address</h3>
-        </div>
-        <p style="color: #333; line-height: 1.5;">
-          ${order.customer.address?.street || "N/A"}<br>
-          ${[order.customer.address?.area, order.customer.address?.city].filter(Boolean).join(", ")}<br>
-          Phone: ${order.customer.phone}
-        </p>
-      </div>
-      
-      <!-- Order Items -->
-      <div style="margin-bottom: 32px;">
-        <h3 style="font-size: 18px; margin-bottom: 16px;">Order Items</h3>
-        <table class="responsive-table" style="width: 100%;">
-          <thead>
-            <tr style="background: #F8F9F8;">
-              <th style="padding: 12px; text-align: left;">Product</th>
-              <th style="padding: 12px; text-align: center;">Quantity</th>
-              <th style="padding: 12px; text-align: right;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-        </table>
-      </div>
-      
-      <!-- Order Summary -->
-      <div style="background: #1A1A1A; padding: 24px; border-radius: 16px; margin-bottom: 32px;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-          <span style="color: rgba(255,255,255,0.6);">Subtotal</span>
-          <span style="color: white;">${order.subtotal.toLocaleString()} ৳</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-          <span style="color: rgba(255,255,255,0.6);">Delivery Charge</span>
-          <span style="color: white;">${order.deliveryCharge.toLocaleString()} ৳</span>
-        </div>
-        <div style="border-top: 1px solid rgba(255,255,255,0.1); margin: 16px 0;"></div>
-        <div style="display: flex; justify-content: space-between; align-items: baseline;">
-          <span style="font-size: 18px; font-weight: 600; color: #4CAF50;">Total Amount</span>
-          <span style="font-size: 24px; font-weight: 700; color: #4CAF50;">${order.total.toLocaleString()} ৳</span>
-        </div>
-      </div>
-      
-      <!-- CTA Button -->
-      <div class="text-center">
-        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}" class="btn" style="color: white;">View Full Order Details →</a>
+      <div style="text-align:center;">
+        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}" class="button">View Order Details</a>
       </div>
     </div>
-    
-    <!-- Footer -->
-    <div style="background: #F8F9F8; padding: 32px; text-align: center; border-top: 1px solid #E0E0E0;">
-      <p style="color: #666; font-size: 13px; margin-bottom: 8px;">
-        🌱 Beeyond Harvest — Fresh from farm to your doorstep
-      </p>
-      <p style="color: #999; font-size: 12px;">
-        Need assistance? <a href="mailto:support@beeyondharvest.com" style="color: #4CAF50; text-decoration: none;">support@beeyondharvest.com</a>
-      </p>
-      <p style="color: #999; font-size: 11px; margin-top: 16px;">
-        © ${new Date().getFullYear()} Beeyond Harvest. All rights reserved.
-      </p>
+    <div class="footer">
+      <p>Beeyond Harvest - Fresh from farm to your doorstep 🌱</p>
+      <p>Need help? Contact us at support@beeyondharvest.com</p>
+      <p>© ${new Date().getFullYear()} Beeyond Harvest. All rights reserved.</p>
     </div>
   </div>
 </body>
@@ -281,263 +107,40 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
 };
 
 const generateAdminEmailTemplate = (order, type = "new_order") => {
-  const isNew = type === "new_order";
-  const title = isNew ? "🛍️ New Order Received" : "📦 Order Status Changed";
-  const tagLabel = isNew ? "NEW ORDER ALERT" : "STATUS UPDATE";
-
-  const statusConfig = {
-    delivered: {
-      bg: "#E8F5E9",
-      text: "#2E7D32",
-      border: "#A5D6A7",
-      icon: "✅",
-    },
-    cancelled: {
-      bg: "#FFEBEE",
-      text: "#C62828",
-      border: "#FFCDD2",
-      icon: "❌",
-    },
-    pending: { bg: "#FFF3E0", text: "#EF6C00", border: "#FFE0B2", icon: "⏳" },
-    processing: {
-      bg: "#E3F2FD",
-      text: "#1565C0",
-      border: "#BBDEFB",
-      icon: "⚙️",
-    },
-    shipped: { bg: "#F3E5F5", text: "#7B1FA2", border: "#E1BEE7", icon: "🚚" },
-  };
-
-  const status = statusConfig[order.orderStatus] || statusConfig.pending;
-
-  const itemsHtml = order.items
+  const title =
+    type === "new_order" ? "🆕 New Order Received" : "🔄 Order Status Changed";
+  const itemsList = order.items
     .map(
-      (item) => `
-        <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #F0F0F0;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="width: 40px; height: 40px; background: #F5F5F5; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">🛒</div>
-              <div>
-                <div style="font-weight: 600; color: #1A1A1A;">${item.name}</div>
-                <div style="font-size: 12px; color: #666;">Qty: ${item.quantity} × ${item.price.toLocaleString()} ৳</div>
-              </div>
-            </div>
-          </td>
-          <td style="padding: 12px; border-bottom: 1px solid #F0F0F0; text-align: right; font-weight: 700;">${item.total.toLocaleString()} ৳</td>
-        </tr>
-      `,
+      (item) =>
+        `• ${item.name} x ${item.quantity} = ${item.total.toLocaleString()} ৳`,
     )
-    .join("");
+    .join("\n");
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>${title} - Beeyond Harvest Admin</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-      background-color: #F0F2F5;
-      margin: 0;
-      padding: 20px;
-      line-height: 1.5;
-      color: #1A1A1A;
-    }
-    
-    .container {
-      max-width: 650px;
-      margin: 0 auto;
-      background-color: #FFFFFF;
-      border-radius: 20px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-    }
-    
-    @media only screen and (max-width: 600px) {
-      body {
-        padding: 10px;
-      }
-    }
-    
-    .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 100px;
-      font-size: 12px;
-      font-weight: 600;
-    }
-    
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 8px 0;
-      border-bottom: 1px solid #F0F0F0;
-    }
-    
-    @media only screen and (max-width: 480px) {
-      .info-row {
-        flex-direction: column;
-        gap: 4px;
-      }
-      .responsive-grid {
-        grid-template-columns: 1fr !important;
-      }
-    }
+    body { font-family: monospace; background: #f5f5f5; padding: 20px; }
+    .admin-box { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; padding: 24px; border-left: 4px solid #667eea; }
+    .order-details { background: #f9fafb; padding: 16px; border-radius: 8px; margin: 16px 0; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Header -->
-    <div style="background: linear-gradient(135deg, #1A1A2E 0%, #16213E 100%); padding: 40px 32px;">
-      <div style="text-align: center; margin-bottom: 24px;">
-        <div style="font-size: 48px; margin-bottom: 8px;">${isNew ? "🛍️" : "📦"}</div>
-        <div style="background: rgba(255,255,255,0.15); display: inline-block; padding: 4px 16px; border-radius: 100px; font-size: 11px; font-weight: 600; letter-spacing: 1px; color: #A78BFA; margin-bottom: 16px;">
-          ${tagLabel}
-        </div>
-        <h1 style="color: #FFFFFF; font-size: 28px; margin-bottom: 8px;">${isNew ? "New Order Received!" : "Order Status Updated"}</h1>
-        <p style="color: rgba(255,255,255,0.7); font-size: 14px;">Order #${order.orderNumber}</p>
-      </div>
+  <div class="admin-box">
+    <h2>${title}</h2>
+    <p><strong>Order:</strong> ${order.orderNumber}</p>
+    <p><strong>Customer:</strong> ${order.customer.name} (${order.customer.phone})</p>
+    <p><strong>Email:</strong> ${order.customer.email}</p>
+    <p><strong>Address:</strong> ${order.customer.address?.street || "N/A"}, ${order.customer.address?.area || ""}, ${order.customer.address?.city || ""}</p>
+    <div class="order-details">
+      <strong>Items:</strong><br/>
+      ${itemsList.replace(/\n/g, "<br/>")}
+      <hr/>
+      <strong>Total:</strong> ${order.total.toLocaleString()} ৳<br/>
+      <strong>Payment:</strong> ${order.paymentMethod}<br/>
+      <strong>Status:</strong> ${order.orderStatus}
     </div>
-    
-    <!-- Content -->
-    <div style="padding: 32px;">
-      <!-- Quick Stats -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-bottom: 32px;" class="responsive-grid">
-        <div style="background: #F8F9FA; padding: 16px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 24px; margin-bottom: 4px;">💰</div>
-          <div style="font-size: 20px; font-weight: 700; color: #1A1A2E;">${order.total.toLocaleString()} ৳</div>
-          <div style="font-size: 11px; color: #666;">Total Amount</div>
-        </div>
-        <div style="background: #F8F9FA; padding: 16px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 24px; margin-bottom: 4px;">📦</div>
-          <div style="font-size: 20px; font-weight: 700; color: #1A1A2E;">${order.items.length}</div>
-          <div style="font-size: 11px; color: #666;">Items</div>
-        </div>
-        <div style="background: #F8F9FA; padding: 16px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 24px; margin-bottom: 4px;">${status.icon}</div>
-          <div style="font-size: 14px; font-weight: 700; color: ${status.text};">${order.orderStatus.toUpperCase()}</div>
-          <div style="font-size: 11px; color: #666;">Current Status</div>
-        </div>
-      </div>
-      
-      <!-- Customer Information -->
-      <div style="margin-bottom: 32px;">
-        <h2 style="font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
-          <span>👤</span> Customer Information
-        </h2>
-        <div style="background: #F8F9FA; padding: 20px; border-radius: 12px;">
-          <div class="info-row">
-            <span style="color: #666;">Customer Name</span>
-            <span style="font-weight: 600;">${order.customer.name}</span>
-          </div>
-          <div class="info-row">
-            <span style="color: #666;">Email Address</span>
-            <span style="font-weight: 600;">${order.customer.email}</span>
-          </div>
-          <div class="info-row">
-            <span style="color: #666;">Phone Number</span>
-            <span style="font-weight: 600;">${order.customer.phone}</span>
-          </div>
-          <div class="info-row" style="border-bottom: none;">
-            <span style="color: #666;">Delivery Address</span>
-            <span style="font-weight: 600; text-align: right; flex: 1; margin-left: 20px;">
-              ${order.customer.address?.street || "N/A"}<br>
-              ${[order.customer.address?.area, order.customer.address?.city].filter(Boolean).join(", ")}
-            </span>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Order Details -->
-      <div style="margin-bottom: 32px;">
-        <h2 style="font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
-          <span>ℹ️</span> Order Details
-        </h2>
-        <div style="background: #F8F9FA; padding: 20px; border-radius: 12px;">
-          <div class="info-row">
-            <span style="color: #666;">Payment Method</span>
-            <span style="font-weight: 600;">${order.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : order.paymentMethod}</span>
-          </div>
-          <div class="info-row">
-            <span style="color: #666;">Payment Status</span>
-            <span style="font-weight: 600; color: ${order.paymentStatus === "paid" ? "#2E7D32" : "#EF6C00"};">${order.paymentStatus === "paid" ? "✓ Paid" : "Pending"}</span>
-          </div>
-          <div class="info-row">
-            <span style="color: #666;">Order Date</span>
-            <span style="font-weight: 600;">${new Date(order.createdAt).toLocaleString()}</span>
-          </div>
-          ${
-            order.trackingNumber
-              ? `
-          <div class="info-row" style="border-bottom: none;">
-            <span style="color: #666;">Tracking Number</span>
-            <span style="font-weight: 600;">${order.trackingNumber}</span>
-          </div>
-          `
-              : ""
-          }
-        </div>
-      </div>
-      
-      <!-- Order Items -->
-      <div style="margin-bottom: 32px;">
-        <h2 style="font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
-          <span>🛍️</span> Order Items
-        </h2>
-        <div style="border: 1px solid #F0F0F0; border-radius: 12px; overflow: hidden;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background: #F8F9FA; border-bottom: 1px solid #F0F0F0;">
-                <th style="padding: 12px; text-align: left;">Product</th>
-                <th style="padding: 12px; text-align: right;">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsHtml}
-              <tr style="background: #F8F9FA;">
-                <td style="padding: 16px 12px; font-weight: 600;">Subtotal</td>
-                <td style="padding: 16px 12px; text-align: right; font-weight: 600;">${order.subtotal.toLocaleString()} ৳</td>
-              </tr>
-              <tr style="background: #F8F9FA;">
-                <td style="padding: 12px; font-weight: 600;">Delivery Charge</td>
-                <td style="padding: 12px; text-align: right; font-weight: 600;">${order.deliveryCharge.toLocaleString()} ৳</td>
-              </tr>
-              <tr style="background: #1A1A2E;">
-                <td style="padding: 16px 12px; font-weight: 700; color: #A78BFA; font-size: 16px;">GRAND TOTAL</td>
-                <td style="padding: 16px 12px; text-align: right; font-weight: 700; color: #A78BFA; font-size: 20px;">${order.total.toLocaleString()} ৳</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      
-      <!-- Action Buttons -->
-      <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        <a href="${process.env.ADMIN_URL || "http://localhost:5000"}/admin/orders/${order._id}" style="flex: 1; background: #1A1A2E; color: white; text-decoration: none; padding: 14px; text-align: center; border-radius: 12px; font-weight: 600;">
-          📋 View Full Order
-        </a>
-        <a href="${process.env.ADMIN_URL || "http://localhost:5000"}/admin/orders/${order._id}/edit" style="flex: 1; background: #4CAF50; color: white; text-decoration: none; padding: 14px; text-align: center; border-radius: 12px; font-weight: 600;">
-          ✏️ Update Status
-        </a>
-      </div>
-    </div>
-    
-    <!-- Footer -->
-    <div style="background: #F8F9FA; padding: 24px; text-align: center; border-top: 1px solid #E0E0E0;">
-      <p style="color: #666; font-size: 12px;">
-        Beeyond Harvest Admin System — Automated Notification
-      </p>
-      <p style="color: #999; font-size: 11px; margin-top: 8px;">
-        © ${new Date().getFullYear()} Beeyond Harvest. All rights reserved.
-      </p>
-    </div>
+    <p><a href="${process.env.ADMIN_URL || "http://localhost:5000"}/admin/orders/${order._id}" style="color:#667eea;">View in Admin Panel →</a></p>
   </div>
 </body>
 </html>`;
