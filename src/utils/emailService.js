@@ -112,7 +112,7 @@ const sendEmail = async (to, subject, html, retry = 0) => {
   }
 
   try {
-    const t = (await getTransporter()) || (await getTransporter());
+    const t = await getTransporter();
 
     if (!t) {
       return { success: false, error: "Transporter unavailable" };
@@ -121,7 +121,7 @@ const sendEmail = async (to, subject, html, retry = 0) => {
     console.log(`📧 Sending to ${to} (attempt ${retry + 1})`);
 
     const sendPromise = t.sendMail({
-      from: `"Beeyond Harvest" <${process.env.EMAIL_USER}>`,
+      from: `"Beeyond Harvest" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
       to,
       subject,
       html,
