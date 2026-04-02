@@ -41,9 +41,7 @@ const shouldAttemptEmail = () => {
   if (consecutiveFailures >= 5) {
     const now = Date.now();
     if (now - lastFailureTime < EMAIL_CONFIG.cooldownPeriod) {
-      console.log(
-        `⏸️ Email in cooldown (${consecutiveFailures} failures). Skipping...`,
-      );
+      console.log(`⏸️ Email in cooldown (${consecutiveFailures} failures). Skipping...`);
       return false;
     } else {
       consecutiveFailures = 0;
@@ -72,11 +70,7 @@ const initTransporter = async () => {
       port,
       secure: port === 465,
       auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-      tls: {
-        servername: EMAIL_HOST,
-        rejectUnauthorized: false,
-        minVersion: "TLSv1.2",
-      },
+      tls: { servername: EMAIL_HOST, rejectUnauthorized: false, minVersion: "TLSv1.2" },
       family: 4,
       connectionTimeout: EMAIL_CONFIG.connectionTimeout,
       greetingTimeout: EMAIL_CONFIG.greetingTimeout,
@@ -89,15 +83,11 @@ const initTransporter = async () => {
     try {
       await Promise.race([
         transporter.verify(),
-        new Promise((_, r) =>
-          setTimeout(() => r(new Error("Verification timeout")), 5000),
-        ),
+        new Promise((_, r) => setTimeout(() => r(new Error("Verification timeout")), 5000)),
       ]);
       console.log(`✅ Email transporter ready (${resolvedHost}:${port})`);
     } catch (verifyError) {
-      console.warn(
-        `⚠️ Transporter verification failed: ${verifyError.message}`,
-      );
+      console.warn(`⚠️ Transporter verification failed: ${verifyError.message}`);
     }
 
     return transporter;
@@ -114,15 +104,12 @@ const initTransporter = async () => {
 // CORE SEND
 // ─────────────────────────────────────────────
 const sendEmail = async (to, subject, html, retryCount = 0) => {
-  if (!shouldAttemptEmail())
-    return { success: false, error: "Email in cooldown", skipped: true };
-  if (process.env.DISABLE_EMAIL === "true")
-    return { success: true, disabled: true };
-  if (!to || !subject || !html)
-    return { success: false, error: "Invalid parameters" };
+  if (!shouldAttemptEmail()) return { success: false, error: "Email in cooldown", skipped: true };
+  if (process.env.DISABLE_EMAIL === "true") return { success: true, disabled: true };
+  if (!to || !subject || !html) return { success: false, error: "Invalid parameters" };
 
   try {
-    let t = transporter || (await initTransporter());
+    let t = transporter || await initTransporter();
     if (!t) return { success: false, error: "Email service unavailable" };
 
     const from = `"BeeHarvest" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`;
@@ -130,12 +117,7 @@ const sendEmail = async (to, subject, html, retryCount = 0) => {
 
     const info = await Promise.race([
       t.sendMail({ from, to, subject, html }),
-      new Promise((_, r) =>
-        setTimeout(
-          () => r(new Error("Send timeout")),
-          EMAIL_CONFIG.socketTimeout,
-        ),
-      ),
+      new Promise((_, r) => setTimeout(() => r(new Error("Send timeout")), EMAIL_CONFIG.socketTimeout)),
     ]);
 
     console.log(`✅ Email sent → ${to} [${info.messageId}]`);
@@ -143,29 +125,14 @@ const sendEmail = async (to, subject, html, retryCount = 0) => {
     lastFailureTime = 0;
     return { success: true, messageId: info.messageId };
   } catch (err) {
-    console.error(
-      `❌ Email failed (attempt ${retryCount + 1}) → ${to}:`,
-      err.message,
-    );
+    console.error(`❌ Email failed (attempt ${retryCount + 1}) → ${to}:`, err.message);
     consecutiveFailures++;
     lastFailureTime = Date.now();
 
-    const shouldReset = [
-      "EAUTH",
-      "ECONNECTION",
-      "ETIMEDOUT",
-      "ESOCKET",
-      "ENETUNREACH",
-    ].includes(err.code);
-    if (shouldReset) {
-      console.log("🔄 Resetting transporter:", err.code);
-      transporter = null;
-    }
+    const shouldReset = ["EAUTH","ECONNECTION","ETIMEDOUT","ESOCKET","ENETUNREACH"].includes(err.code);
+    if (shouldReset) { console.log("🔄 Resetting transporter:", err.code); transporter = null; }
 
-    if (
-      retryCount < EMAIL_CONFIG.maxRetries &&
-      !err.message.includes("timeout")
-    ) {
+    if (retryCount < EMAIL_CONFIG.maxRetries && !err.message.includes("timeout")) {
       const delay = EMAIL_CONFIG.retryDelay * Math.pow(2, retryCount);
       console.log(`⏳ Retrying in ${delay}ms...`);
       await new Promise((r) => setTimeout(r, delay));
@@ -177,9 +144,7 @@ const sendEmail = async (to, subject, html, retryCount = 0) => {
 };
 
 const sendEmailAsync = (to, subject, html) => {
-  sendEmail(to, subject, html).catch((err) =>
-    console.error("Background email error:", err.message),
-  );
+  sendEmail(to, subject, html).catch((err) => console.error("Background email error:", err.message));
 };
 
 // ─────────────────────────────────────────────
@@ -199,15 +164,11 @@ const sendOrderConfirmation = async (order) => {
     results.customer = await sendEmail(
       order.customerEmail,
       `✅ অর্ডার নিশ্চিত — ${order.orderNumber} | BeeHarvest`,
-      html,
+      html
     );
     if (!results.customer.success) {
       console.warn(`⚠️ Customer email failed for ${order.customerEmail}`);
-      await storeFailedEmail(
-        order._id,
-        order.customerEmail,
-        "order_confirmation",
-      );
+      await storeFailedEmail(order._id, order.customerEmail, "order_confirmation");
     }
   }
 
@@ -218,7 +179,7 @@ const sendOrderConfirmation = async (order) => {
     results.admin = await sendEmail(
       adminEmail,
       `🔴 নতুন অর্ডার — ${order.orderNumber} (${order.totalAmount} BDT) | BeeHarvest`,
-      html,
+      html
     );
   }
 
@@ -230,20 +191,17 @@ const sendOrderConfirmation = async (order) => {
  * Call this when order status changes.
  */
 const sendStatusUpdate = async (order) => {
-  if (!order.customerEmail)
-    return { success: false, error: "No customer email" };
+  if (!order.customerEmail) return { success: false, error: "No customer email" };
 
   const statusSubjects = {
     processing: `📦 আপনার অর্ডার প্যাক হচ্ছে — ${order.orderNumber}`,
-    shipped: `🚚 অর্ডার পাঠানো হয়েছে — ${order.orderNumber}`,
-    delivered: `🎉 ডেলিভারি সম্পন্ন — ${order.orderNumber} | BeeHarvest`,
-    cancelled: `❌ অর্ডার বাতিল — ${order.orderNumber} | BeeHarvest`,
+    shipped:    `🚚 অর্ডার পাঠানো হয়েছে — ${order.orderNumber}`,
+    delivered:  `🎉 ডেলিভারি সম্পন্ন — ${order.orderNumber} | BeeHarvest`,
+    cancelled:  `❌ অর্ডার বাতিল — ${order.orderNumber} | BeeHarvest`,
   };
 
-  const subject =
-    statusSubjects[order.status] ||
-    `অর্ডার আপডেট — ${order.orderNumber} | BeeHarvest`;
-  const html = orderStatusUpdateCustomer(order);
+  const subject = statusSubjects[order.status] || `অর্ডার আপডেট — ${order.orderNumber} | BeeHarvest`;
+  const html    = orderStatusUpdateCustomer(order);
   return sendEmail(order.customerEmail, subject, html);
 };
 
@@ -254,20 +212,14 @@ const sendLowStockAlert = async (products = []) => {
   const adminEmail = process.env.ADMIN_EMAIL;
   if (!adminEmail || !products.length) return;
   const html = lowStockAdmin(products);
-  return sendEmail(
-    adminEmail,
-    `⚠️ স্টক সতর্কতা — ${products.length}টি পণ্যের স্টক কম | BeeHarvest`,
-    html,
-  );
+  return sendEmail(adminEmail, `⚠️ স্টক সতর্কতা — ${products.length}টি পণ্যের স্টক কম | BeeHarvest`, html);
 };
 
 // ─────────────────────────────────────────────
 // FAILED EMAIL LOG
 // ─────────────────────────────────────────────
 const storeFailedEmail = async (orderId, email, type) => {
-  console.log(
-    `📝 Storing failed email [${type}] for order ${orderId} → ${email}`,
-  );
+  console.log(`📝 Storing failed email [${type}] for order ${orderId} → ${email}`);
   // TODO: save to FailedEmail collection for retry job
 };
 
@@ -278,10 +230,7 @@ const checkEmailHealth = async () => {
   const t = await initTransporter();
   if (!t) return { healthy: false, reason: "No transporter" };
   try {
-    await Promise.race([
-      t.verify(),
-      new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 3000)),
-    ]);
+    await Promise.race([t.verify(), new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 3000))]);
     return { healthy: true };
   } catch (error) {
     return { healthy: false, reason: error.message };
