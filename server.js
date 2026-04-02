@@ -13,7 +13,9 @@ let server;
 const createDefaultAdmin = async () => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      console.log("⏳ Waiting for database connection before creating admin...");
+      console.log(
+        "⏳ Waiting for database connection before creating admin...",
+      );
       await new Promise((resolve) => {
         mongoose.connection.once("connected", resolve);
       });
@@ -43,43 +45,18 @@ const createDefaultAdmin = async () => {
   }
 };
 
-// Graceful shutdown function
-const gracefulShutdown = async (signal) => {
-  console.log(`👋 ${signal} received. Closing server gracefully...`);
-  
-  if (server) {
-    server.close(async (err) => {
-      if (err) {
-        console.error("❌ Error closing server:", err);
-        process.exit(1);
-      }
-      console.log("✅ HTTP server closed");
-      
-      try {
-        await mongoose.connection.close();
-        console.log("✅ MongoDB connection closed");
-        process.exit(0);
-      } catch (dbErr) {
-        console.error("❌ Error closing MongoDB:", dbErr.message);
-        process.exit(1);
-      }
-    });
-  } else {
-    process.exit(0);
-  }
-};
-
 // Start the server
 const startServer = async () => {
   try {
     await connectDB();
     await createDefaultAdmin();
 
-    server = app.listen(PORT, () => {
+    server = app.listen(PORT, "0.0.0.0", () => {
       console.log(
         `🚀 Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`,
       );
-      console.log(`📊 Health check: http://localhost:${PORT}/health`);
+      console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
+      console.log(`✅ Bound to 0.0.0.0:${PORT} - Ready for Render`);
     });
   } catch (error) {
     console.error("❌ Failed to start server:", error.message);
@@ -89,22 +66,77 @@ const startServer = async () => {
 
 startServer();
 
-// Handle unhandled rejections
+// ✅ FIXED: Graceful shutdown for Mongoose 7+
 process.on("unhandledRejection", (err) => {
   console.error(`❌ Unhandled Rejection: ${err.message}`);
   console.error(err.stack);
-  gracefulShutdown("unhandledRejection");
+  if (server) {
+    server.close(async () => {
+      try {
+        await mongoose.connection.close();
+        console.log("✅ MongoDB connection closed");
+      } catch (e) {
+        console.error("Error closing MongoDB:", e.message);
+      }
+      process.exit(1);
+    });
+  } else {
+    process.exit(1);
+  }
 });
 
-// Handle uncaught exceptions
 process.on("uncaughtException", (err) => {
   console.error(`❌ Uncaught Exception: ${err.message}`);
   console.error(err.stack);
-  gracefulShutdown("uncaughtException");
+  if (server) {
+    server.close(async () => {
+      try {
+        await mongoose.connection.close();
+        console.log("✅ MongoDB connection closed");
+      } catch (e) {
+        console.error("Error closing MongoDB:", e.message);
+      }
+      process.exit(1);
+    });
+  } else {
+    process.exit(1);
+  }
 });
 
-// Handle SIGTERM (Render uses this for graceful shutdown)
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+// ✅ FIXED: SIGTERM handler
+process.on("SIGTERM", async () => {
+  console.log("👋 SIGTERM received. Closing server gracefully...");
+  if (server) {
+    server.close(async () => {
+      console.log("✅ HTTP server closed");
+      try {
+        await mongoose.connection.close();
+        console.log("✅ MongoDB connection closed");
+      } catch (err) {
+        console.error("❌ Error closing MongoDB:", err.message);
+      }
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
+});
 
-// Handle SIGINT (Ctrl+C)
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+// ✅ FIXED: SIGINT handler (Ctrl+C)
+process.on("SIGINT", async () => {
+  console.log("👋 SIGINT received. Closing server gracefully...");
+  if (server) {
+    server.close(async () => {
+      console.log("✅ HTTP server closed");
+      try {
+        await mongoose.connection.close();
+        console.log("✅ MongoDB connection closed");
+      } catch (err) {
+        console.error("❌ Error closing MongoDB:", err.message);
+      }
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
+});
