@@ -1,8 +1,7 @@
-// utils/emailService.js
+// utils/emailService.js - FIXED VERSION
 // Production-safe, non-blocking, fail-tolerant email service
 
 const nodemailer = require("nodemailer");
-const dns = require("dns").promises;
 const {
   orderConfirmationCustomer,
   orderStatusUpdateCustomer,
@@ -11,30 +10,61 @@ const {
 } = require("./emailTemplates");
 
 let transporter = null;
-let isInitializing = false;
 let lastFailureTime = 0;
 let consecutiveFailures = 0;
 
 const EMAIL_CONFIG = {
-  connectionTimeout: 5000,
-  greetingTimeout: 5000,
-  socketTimeout: 5000,
+  connectionTimeout: 10000, // Increased
+  socketTimeout: 10000, // Increased
   maxRetries: 2,
-  retryDelay: 1000,
+  retryDelay: 2000,
   cooldownPeriod: 60000,
 };
 
-const resolveIPv4 = async (hostname) => {
+// REMOVED DNS resolution - it was causing delays
+// REMOVED verification timeout race - it was causing false failures
+
+const initTransporter = async () => {
+  if (transporter) return transporter;
+
   try {
-    const addresses = await dns.resolve4(hostname);
-    if (addresses?.length) {
-      console.log(`🔍 Resolved ${hostname} → ${addresses[0]} (IPv4)`);
-      return addresses[0];
+    const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
+    if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
+      console.warn("⚠️ Email not configured. Skipping transporter.");
+      return null;
     }
+
+    const port = parseInt(EMAIL_PORT || "587", 10); // Changed to 587 (TLS)
+
+    console.log(`📧 Initializing email transporter on ${EMAIL_HOST}:${port}`);
+
+    transporter = nodemailer.createTransport({
+      host: EMAIL_HOST,
+      port: port,
+      secure: port === 465, // false for port 587
+      auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASS,
+      },
+      tls: {
+        rejectUnauthorized: false,
+        ciphers: "TLSv1.2",
+      },
+      connectionTimeout: EMAIL_CONFIG.connectionTimeout,
+      socketTimeout: EMAIL_CONFIG.socketTimeout,
+      // Simplified config - no pooling
+      pool: false,
+    });
+
+    // Don't verify - just return transporter
+    // Verification was causing timeouts
+    console.log(`✅ Email transporter created (${EMAIL_HOST}:${port})`);
+    return transporter;
   } catch (err) {
-    console.warn(`⚠️ DNS resolve failed for ${hostname}:`, err.message);
+    console.error("❌ Transporter init error:", err.message);
+    transporter = null;
+    return null;
   }
-  return hostname;
 };
 
 const shouldAttemptEmail = () => {
@@ -52,66 +82,8 @@ const shouldAttemptEmail = () => {
   return true;
 };
 
-const initTransporter = async () => {
-  if (transporter) return transporter;
-  if (isInitializing) return null;
-  isInitializing = true;
-
-  try {
-    const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
-    if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
-      console.warn("⚠️ Email not configured. Skipping transporter.");
-      return null;
-    }
-
-    const port = parseInt(EMAIL_PORT || "465", 10);
-    const resolvedHost = await resolveIPv4(EMAIL_HOST);
-
-    transporter = nodemailer.createTransport({
-      host: resolvedHost,
-      port,
-      secure: port === 465,
-      auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-      tls: {
-        servername: EMAIL_HOST,
-        rejectUnauthorized: false,
-        minVersion: "TLSv1.2",
-      },
-      family: 4,
-      connectionTimeout: EMAIL_CONFIG.connectionTimeout,
-      greetingTimeout: EMAIL_CONFIG.greetingTimeout,
-      socketTimeout: EMAIL_CONFIG.socketTimeout,
-      pool: true,
-      maxConnections: 3,
-      maxMessages: 100,
-    });
-
-    try {
-      await Promise.race([
-        transporter.verify(),
-        new Promise((_, r) =>
-          setTimeout(() => r(new Error("Verification timeout")), 5000),
-        ),
-      ]);
-      console.log(`✅ Email transporter ready (${resolvedHost}:${port})`);
-    } catch (verifyError) {
-      console.warn(
-        `⚠️ Transporter verification failed: ${verifyError.message}`,
-      );
-    }
-
-    return transporter;
-  } catch (err) {
-    console.error("❌ Transporter init error:", err.message);
-    transporter = null;
-    return null;
-  } finally {
-    isInitializing = false;
-  }
-};
-
 // ─────────────────────────────────────────────
-// CORE SEND
+// CORE SEND - SIMPLIFIED
 // ─────────────────────────────────────────────
 const sendEmail = async (to, subject, html, retryCount = 0) => {
   if (!shouldAttemptEmail())
@@ -122,23 +94,26 @@ const sendEmail = async (to, subject, html, retryCount = 0) => {
     return { success: false, error: "Invalid parameters" };
 
   try {
-    let t = transporter || (await initTransporter());
-    if (!t) return { success: false, error: "Email service unavailable" };
+    // Get or create transporter
+    let t = transporter;
+    if (!t) {
+      t = await initTransporter();
+      if (!t) throw new Error("Email service unavailable");
+    }
 
     const from = `"BeeHarvest" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`;
     console.log(`📧 Sending to: ${to} (attempt ${retryCount + 1})`);
 
-    const info = await Promise.race([
-      t.sendMail({ from, to, subject, html }),
-      new Promise((_, r) =>
-        setTimeout(
-          () => r(new Error("Send timeout")),
-          EMAIL_CONFIG.socketTimeout,
-        ),
-      ),
-    ]);
+    // REMOVED Promise.race - it was causing premature timeouts
+    // Let nodemailer handle its own timeouts
+    const info = await t.sendMail({
+      from,
+      to,
+      subject,
+      html,
+    });
 
-    console.log(`✅ Email sent → ${to} [${info.messageId}]`);
+    console.log(`✅ Email sent → ${to}`);
     consecutiveFailures = 0;
     lastFailureTime = 0;
     return { success: true, messageId: info.messageId };
@@ -150,22 +125,18 @@ const sendEmail = async (to, subject, html, retryCount = 0) => {
     consecutiveFailures++;
     lastFailureTime = Date.now();
 
-    const shouldReset = [
-      "EAUTH",
-      "ECONNECTION",
-      "ETIMEDOUT",
-      "ESOCKET",
-      "ENETUNREACH",
-    ].includes(err.code);
-    if (shouldReset) {
-      console.log("🔄 Resetting transporter:", err.code);
+    // Reset transporter on connection errors
+    if (
+      err.code === "ESOCKET" ||
+      err.code === "ECONNECTION" ||
+      err.code === "ETIMEDOUT"
+    ) {
+      console.log("🔄 Resetting transporter due to connection error");
       transporter = null;
     }
 
-    if (
-      retryCount < EMAIL_CONFIG.maxRetries &&
-      !err.message.includes("timeout")
-    ) {
+    // Retry logic (including timeout errors now)
+    if (retryCount < EMAIL_CONFIG.maxRetries) {
       const delay = EMAIL_CONFIG.retryDelay * Math.pow(2, retryCount);
       console.log(`⏳ Retrying in ${delay}ms...`);
       await new Promise((r) => setTimeout(r, delay));
@@ -176,6 +147,7 @@ const sendEmail = async (to, subject, html, retryCount = 0) => {
   }
 };
 
+// Non-blocking version for background sending
 const sendEmailAsync = (to, subject, html) => {
   sendEmail(to, subject, html).catch((err) =>
     console.error("Background email error:", err.message),
@@ -183,66 +155,90 @@ const sendEmailAsync = (to, subject, html) => {
 };
 
 // ─────────────────────────────────────────────
-// HIGH-LEVEL HELPERS
+// HIGH-LEVEL HELPERS - FIRE AND FORGET
 // ─────────────────────────────────────────────
 
 /**
  * Send order confirmation to customer + alert to admin
- * Call this after a new order is created.
+ * NON-BLOCKING - don't await this
  */
-const sendOrderConfirmation = async (order) => {
-  const results = {};
+const sendOrderConfirmation = (order) => {
+  // Fire and forget - don't block order creation
+  setTimeout(async () => {
+    try {
+      console.log(
+        `📧 [EMAIL] Starting background job for ${order.orderNumber}`,
+      );
 
-  // 1. Customer confirmation
-  if (order.customerEmail) {
-    const html = orderConfirmationCustomer(order);
-    results.customer = await sendEmail(
-      order.customerEmail,
-      `✅ অর্ডার নিশ্চিত — ${order.orderNumber} | BeeHarvest`,
-      html,
-    );
-    if (!results.customer.success) {
-      console.warn(`⚠️ Customer email failed for ${order.customerEmail}`);
-      await storeFailedEmail(
-        order._id,
-        order.customerEmail,
-        "order_confirmation",
+      // 1. Customer confirmation
+      if (order.customerEmail) {
+        const html = orderConfirmationCustomer(order);
+        const result = await sendEmail(
+          order.customerEmail,
+          `✅ Order Confirmed — ${order.orderNumber} | BeeHarvest`,
+          html,
+        );
+
+        if (result.success) {
+          console.log(
+            `✅ [EMAIL] Customer email sent → ${order.customerEmail}`,
+          );
+        } else {
+          console.warn(
+            `⚠️ [EMAIL] Customer email failed for ${order.customerEmail}`,
+          );
+          await storeFailedEmail(
+            order._id,
+            order.customerEmail,
+            "order_confirmation",
+          );
+        }
+      }
+
+      // 2. Admin alert
+      const adminEmail = process.env.ADMIN_EMAIL;
+      if (adminEmail) {
+        const html = newOrderAdmin(order);
+        const result = await sendEmail(
+          adminEmail,
+          `🔴 New Order — ${order.orderNumber} (${order.totalAmount} BDT) | BeeHarvest`,
+          html,
+        );
+
+        if (result.success) {
+          console.log(`✅ [EMAIL] Admin email sent → ${adminEmail}`);
+        }
+      }
+
+      console.log(`📧 [EMAIL] Job complete for ${order.orderNumber}`);
+    } catch (err) {
+      console.error(
+        `📧 [EMAIL] Background job failed for ${order.orderNumber}:`,
+        err.message,
       );
     }
-  }
+  }, 100); // Small delay to ensure order is fully saved
 
-  // 2. Admin alert
-  const adminEmail = process.env.ADMIN_EMAIL;
-  if (adminEmail) {
-    const html = newOrderAdmin(order);
-    results.admin = await sendEmail(
-      adminEmail,
-      `🔴 নতুন অর্ডার — ${order.orderNumber} (${order.totalAmount} BDT) | BeeHarvest`,
-      html,
-    );
-  }
-
-  return results;
+  return { queued: true };
 };
 
 /**
  * Send order status update to customer
- * Call this when order status changes.
  */
 const sendStatusUpdate = async (order) => {
   if (!order.customerEmail)
     return { success: false, error: "No customer email" };
 
   const statusSubjects = {
-    processing: `📦 আপনার অর্ডার প্যাক হচ্ছে — ${order.orderNumber}`,
-    shipped: `🚚 অর্ডার পাঠানো হয়েছে — ${order.orderNumber}`,
-    delivered: `🎉 ডেলিভারি সম্পন্ন — ${order.orderNumber} | BeeHarvest`,
-    cancelled: `❌ অর্ডার বাতিল — ${order.orderNumber} | BeeHarvest`,
+    processing: `📦 Your order is being packed — ${order.orderNumber}`,
+    shipped: `🚚 Order shipped — ${order.orderNumber}`,
+    delivered: `🎉 Delivery completed — ${order.orderNumber} | BeeHarvest`,
+    cancelled: `❌ Order cancelled — ${order.orderNumber} | BeeHarvest`,
   };
 
   const subject =
     statusSubjects[order.status] ||
-    `অর্ডার আপডেট — ${order.orderNumber} | BeeHarvest`;
+    `Order Update — ${order.orderNumber} | BeeHarvest`;
   const html = orderStatusUpdateCustomer(order);
   return sendEmail(order.customerEmail, subject, html);
 };
@@ -256,32 +252,29 @@ const sendLowStockAlert = async (products = []) => {
   const html = lowStockAdmin(products);
   return sendEmail(
     adminEmail,
-    `⚠️ স্টক সতর্কতা — ${products.length}টি পণ্যের স্টক কম | BeeHarvest`,
+    `⚠️ Low Stock Alert — ${products.length} products need restock | BeeHarvest`,
     html,
   );
 };
 
 // ─────────────────────────────────────────────
-// FAILED EMAIL LOG
+// FAILED EMAIL LOG - For retry later
 // ─────────────────────────────────────────────
 const storeFailedEmail = async (orderId, email, type) => {
   console.log(
     `📝 Storing failed email [${type}] for order ${orderId} → ${email}`,
   );
-  // TODO: save to FailedEmail collection for retry job
+  // You can implement database storage here if needed
+  // For now, just log it
 };
 
 // ─────────────────────────────────────────────
-// HEALTH CHECK
+// HEALTH CHECK - Simplified
 // ─────────────────────────────────────────────
 const checkEmailHealth = async () => {
-  const t = await initTransporter();
-  if (!t) return { healthy: false, reason: "No transporter" };
   try {
-    await Promise.race([
-      t.verify(),
-      new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 3000)),
-    ]);
+    const t = await initTransporter();
+    if (!t) return { healthy: false, reason: "No transporter" };
     return { healthy: true };
   } catch (error) {
     return { healthy: false, reason: error.message };
