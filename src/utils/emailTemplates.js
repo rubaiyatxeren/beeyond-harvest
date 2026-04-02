@@ -203,7 +203,7 @@ const footer = () => `
                 color:${HONEY}; font-family:'DM Sans',Arial,sans-serif;
                 font-size:12px; font-weight:500; text-decoration:none;
                 padding:6px 14px; border-radius:999px; letter-spacing:0.03em;
-              ">✉️ support@beeharvest.com.bd</a>
+              ">✉️ support@beeharvest.vercel.app</a>
             </div>
             <!-- Copyright -->
             <p style="
@@ -218,7 +218,7 @@ const footer = () => `
               font-size:10px; color:rgba(255,255,255,0.15);
               margin:8px 0 0; letter-spacing:0.03em;
             ">
-              আপনি এই ইমেইলটি পাচ্ছেন কারণ আপনি beeharvest.com.bd-তে অর্ডার করেছেন।
+              আপনি এই ইমেইলটি পাচ্ছেন কারণ আপনি beeharvest.vercel.app-তে অর্ডার করেছেন।
             </p>
           </td>
         </tr>
@@ -551,7 +551,7 @@ const orderConfirmationCustomer = (order) => {
     <!-- CTA BUTTON -->
     <tr>
       <td style="padding:0 48px 48px; text-align:center;">
-        <a href="https://beeharvest.com.bd" style="
+        <a href="https://beeharvest.vercel.app" style="
           display:inline-block;
           background:linear-gradient(135deg,${HONEY} 0%,${GOLD} 100%);
           color:#000000; font-family:'DM Sans',Arial,sans-serif;
@@ -563,7 +563,7 @@ const orderConfirmationCustomer = (order) => {
         <p style="
           font-family:'DM Sans',Arial,sans-serif;font-size:12px;
           color:rgba(255,255,255,0.25); margin:14px 0 0;
-        ">অর্ডার ট্র্যাক করুন: beeharvest.com.bd</p>
+        ">অর্ডার ট্র্যাক করুন: beeharvest.vercel.app</p>
       </td>
     </tr>
 
@@ -648,7 +648,7 @@ const orderStatusUpdateCustomer = (order) => {
 
     <tr>
       <td style="padding:0 48px 48px; text-align:center;">
-        <a href="https://beeharvest.com.bd" style="
+        <a href="https://beeharvest.vercel.app" style="
           display:inline-block;
           background:linear-gradient(135deg,${HONEY},${GOLD});
           color:#000; font-family:'DM Sans',Arial,sans-serif;
@@ -906,7 +906,7 @@ const newOrderAdmin = (order) => {
     <!-- ADMIN CTA -->
     <tr>
       <td style="padding:0 48px 48px; text-align:center;">
-        <a href="https://beeharvest.com.bd/admin/orders" style="
+        <a href="https://admin-beeharvest.vercel.app/dashboard.html" style="
           display:inline-block;
           background:linear-gradient(135deg,${HONEY},${GOLD});
           color:#000; font-family:'DM Sans',Arial,sans-serif;
