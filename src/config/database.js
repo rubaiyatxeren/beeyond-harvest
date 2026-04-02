@@ -1,57 +1,85 @@
 const mongoose = require("mongoose");
-const dotenv = require("dotenv");
-dotenv.config();
+
+let isConnected = false;
+let retryCount = 0;
+
+const MAX_RETRIES = 5;
+let reconnecting = false;
 
 const connectDB = async () => {
+  if (isConnected || reconnecting) return;
+
+  reconnecting = true;
+
   try {
-    // Add connection options to prevent timeout issues
+    console.log("🔄 Connecting to MongoDB...");
+
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 10000, // Timeout after 10 seconds
-      socketTimeoutMS: 45000, // Close sockets after 45 seconds
-      connectTimeoutMS: 10000, // Connection timeout
-      maxPoolSize: 10, // Maintain up to 10 socket connections
-      family: 4, // Use IPv4, skip trying IPv6
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000,
+      maxPoolSize: 10,
+      family: 4,
     });
+
+    isConnected = true;
+    retryCount = 0;
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
     console.log(`📁 Database: ${conn.connection.name}`);
-
-    // Handle connection events
-    mongoose.connection.on("error", (err) => {
-      console.error("❌ MongoDB connection error:", err);
-    });
-
-    mongoose.connection.on("disconnected", () => {
-      console.log("⚠️ MongoDB disconnected");
-    });
-
-    mongoose.connection.on("reconnected", () => {
-      console.log("✅ MongoDB reconnected");
-    });
-
-    return conn;
   } catch (error) {
+    retryCount++;
     console.error(`❌ MongoDB Connection Error: ${error.message}`);
 
-    // Provide helpful error messages
-    if (error.message.includes("ECONNREFUSED")) {
-      console.error("\n🔧 Troubleshooting:");
-      console.error("1. Make sure MongoDB is running");
-      console.error("2. Check if MongoDB Atlas IP is whitelisted");
-      console.error("3. Verify your connection string in .env file");
-      console.error(
-        "4. Try using local MongoDB: mongodb://localhost:27017/beeyond_harvest",
-      );
+    if (retryCount >= MAX_RETRIES) {
+      console.error("❌ Max retries reached. Stopping.");
+      reconnecting = false;
+      return;
     }
 
-    // Don't exit immediately in development, allow retry
-    if (process.env.NODE_ENV === "production") {
-      process.exit(1);
-    } else {
-      console.log("⚠️  Retrying connection in 5 seconds...");
-      setTimeout(connectDB, 5000);
-    }
+    console.log(`⏳ Retry ${retryCount}/${MAX_RETRIES} in 5 seconds...`);
+
+    setTimeout(() => {
+      reconnecting = false;
+      connectDB();
+    }, 5000);
+
+    return;
   }
+
+  reconnecting = false;
 };
+
+/**
+ * EVENTS (only once)
+ */
+mongoose.connection.on("connected", () => {
+  console.log("🟢 MongoDB connected");
+  isConnected = true;
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.warn("🟡 MongoDB disconnected");
+
+  isConnected = false;
+
+  if (!reconnecting && retryCount < MAX_RETRIES) {
+    reconnecting = true;
+    setTimeout(() => {
+      reconnecting = false;
+      connectDB();
+    }, 5000);
+  }
+});
+
+mongoose.connection.on("reconnected", () => {
+  console.log("🟢 MongoDB reconnected");
+  isConnected = true;
+  retryCount = 0;
+});
+
+mongoose.connection.on("error", (err) => {
+  console.error("🔴 MongoDB error:", err.message);
+});
 
 module.exports = connectDB;
