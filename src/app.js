@@ -3,8 +3,8 @@ const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-const { errorHandler } = require("./middleware/errorMiddleware");
 const mongoose = require("mongoose");
+const { errorHandler } = require("./middleware/errorMiddleware");
 
 // ✅ IMPORT ROUTES
 const authRoutes = require("./routes/authRoutes");
@@ -17,10 +17,10 @@ const deliveryChargeRoutes = require("./routes/deliveryChargeRoutes");
 
 const app = express();
 
-// ✅ FIX 1: Trust proxy (Render uses proxy)
+// ✅ TRUST PROXY (Render / Nginx)
 app.set("trust proxy", 1);
 
-// Security middleware
+// ✅ SECURITY
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -28,7 +28,7 @@ app.use(
   }),
 );
 
-// CORS configuration
+// ✅ CORS CONFIG
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
@@ -52,15 +52,17 @@ app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
+
       if (process.env.NODE_ENV === "development") {
         return callback(null, true);
       }
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        callback(null, true);
-      } else {
-        console.log("Blocked origin:", origin);
-        callback(null, true); // Allow but log
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
       }
+
+      console.warn("⚠️ Blocked CORS origin:", origin);
+      return callback(null, true); // allow but log (safe for production debugging)
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -76,46 +78,43 @@ app.use(
   }),
 );
 
-// Body parser
+// ✅ BODY PARSER
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Logging
+// ✅ LOGGING (dev only)
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// ✅ FIX 2: Rate limiting with proper IPv6 handling
+// ✅ RATE LIMIT (Render-safe with IPv6 fix)
 const limiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
+  windowMs: 10 * 60 * 1000, // 10 min
   max: 100,
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
 
-  // ✅ FIX: Proper key generator with IPv6 support
   keyGenerator: (req) => {
-    // Get client IP from X-Forwarded-For header (Render proxy)
     const forwarded = req.headers["x-forwarded-for"];
     let ip = forwarded ? forwarded.split(",")[0].trim() : req.ip;
 
-    // Remove port if present (for IPv6 compatibility)
     if (ip && ip.includes(":")) {
-      // For IPv6, remove port if present (format: [::1]:port)
       ip = ip.split(":").slice(0, -1).join(":");
     }
+
     return ip;
   },
 
-  // ✅ FIX: Disable validation warnings
   validate: {
     xForwardedForHeader: false,
     keyGeneratorIpFallback: false,
   },
 });
+
 app.use("/api", limiter);
 
-// app.js — fix: remove the first duplicate, keep only this one
+// ✅ ROUTES
 app.use("/api/auth", authRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/products", productRoutes);
@@ -123,50 +122,79 @@ app.use("/api/banners", bannerRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/delivery-charges", deliveryChargeRoutes);
-// Add this after all app.use() statements
-console.log("✅ Routes registered:");
-console.log("  - /api/auth");
-console.log("  - /api/categories");
-console.log("  - /api/products");
-console.log("  - /api/banners");
-console.log("  - /api/orders");
-console.log("  - /api/dashboard");
-console.log("  - /api/delivery-charges"); // Should see this in logs
 
-// Health check
+// ✅ DEBUG ROUTE LIST
+console.log("✅ Routes registered:");
+[
+  "/api/auth",
+  "/api/categories",
+  "/api/products",
+  "/api/banners",
+  "/api/orders",
+  "/api/dashboard",
+  "/api/delivery-charges",
+].forEach((route) => console.log("  -", route));
+
+// ✅ HEALTH CHECK (Render ping)
 app.get("/health", (req, res) => {
-  const dbStatus = mongoose.connection.readyState;
-  const dbStatusText =
-    {
-      0: "disconnected",
-      1: "connected",
-      2: "connecting",
-      3: "disconnecting",
-    }[dbStatus] || "unknown";
+  const dbState = mongoose.connection.readyState;
+
+  const dbStatusMap = {
+    0: "disconnected",
+    1: "connected",
+    2: "connecting",
+    3: "disconnecting",
+  };
 
   res.json({
     status: "OK",
-    timestamp: new Date().toISOString(),
     message: "Server is running",
+    timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || "development",
     database: {
-      status: dbStatusText,
+      status: dbStatusMap[dbState] || "unknown",
       host: mongoose.connection.host || "not connected",
       name: mongoose.connection.name || "not connected",
     },
   });
 });
 
-// 404 handler
+// ✅ 404 HANDLER
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Cannot ${req.method} ${req.url}`,
+    message: `Cannot ${req.method} ${req.originalUrl}`,
   });
 });
 
-// Error handler
+// ✅ GLOBAL ERROR HANDLER
 app.use(errorHandler);
+
+// ✅ CRASH SAFETY (SMART VERSION)
+
+// Unhandled Promise Rejection
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Unhandled Rejection:", reason);
+
+  if (reason?.name === "MongoNetworkError") {
+    console.error("❌ Critical DB error → Restarting...");
+    process.exit(1);
+  }
+});
+
+// Uncaught Exception
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught Exception:", err.message, err.stack);
+
+  if (
+    err.code === "ERR_USE_AFTER_FREE" ||
+    err.code === "ENOMEM" ||
+    err.name === "MongoNetworkError"
+  ) {
+    console.error("❌ Fatal error → Restarting...");
+    process.exit(1);
+  }
+});
 
 module.exports = app;
