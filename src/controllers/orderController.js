@@ -187,7 +187,7 @@ const createOrder = async (req, res) => {
     const orderItems = [];
 
     // ==============================
-    // 🔥 PROCESS ITEMS
+    // 🔥 PROCESS & VALIDATE ITEMS
     // ==============================
     for (const item of items) {
       const product = productMap.get(item.product);
@@ -222,14 +222,17 @@ const createOrder = async (req, res) => {
     const total = subtotal + (deliveryCharge || 60);
 
     // ==============================
-    // 🔥 GENERATE ORDER NUMBER (SAFE)
+    // ✅ FIX 1: ORDER NUMBER — no race condition
     // ==============================
     const date = new Date();
-    const count = await Order.countDocuments();
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, "0");
 
     const orderNumber = `ORD-${date.getFullYear()}${String(
       date.getMonth() + 1,
-    ).padStart(2, "0")}-${String(count + 1).padStart(5, "0")}`;
+    ).padStart(2, "0")}-${timestamp}${random}`;
 
     // ==============================
     // 🔥 CREATE ORDER
@@ -254,18 +257,28 @@ const createOrder = async (req, res) => {
     console.log(`✅ Order created: ${order.orderNumber}`);
 
     // ==============================
-    // 🔥 BULK STOCK UPDATE (FAST)
+    // ✅ FIX 2: ATOMIC STOCK UPDATE — prevents overselling
     // ==============================
     const bulkOps = items.map((item) => ({
       updateOne: {
-        filter: { _id: item.product },
+        filter: { _id: item.product, stock: { $gte: item.quantity } },
         update: { $inc: { stock: -item.quantity } },
       },
     }));
 
-    await Product.bulkWrite(bulkOps);
+    const stockResult = await Product.bulkWrite(bulkOps);
 
-    console.log("✅ Stock updated");
+    if (stockResult.modifiedCount !== items.length) {
+      // Roll back order if stock was insufficient
+      await Order.findByIdAndDelete(order._id);
+      console.warn("⚠️ Stock mismatch — order rolled back");
+      return res.status(400).json({
+        success: false,
+        message: "Some items went out of stock. Please try again.",
+      });
+    }
+
+    console.log("✅ Stock updated atomically");
 
     // ==============================
     // ✅ RESPONSE FIRST (FAST API)
@@ -331,10 +344,7 @@ const createOrder = async (req, res) => {
 const getOrders = async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
-
-    // 🔥 LIMIT PROTECTION (VERY IMPORTANT)
     const limit = Math.min(parseInt(req.query.limit) || 10, 50);
-
     const skip = (page - 1) * limit;
     let query = {};
 
@@ -360,8 +370,7 @@ const getOrders = async (req, res) => {
         .sort("-createdAt")
         .skip(skip)
         .limit(limit)
-        .lean(), // 🔥 HUGE PERFORMANCE BOOST
-
+        .lean(),
       Order.countDocuments(query),
     ]);
 
@@ -389,7 +398,7 @@ const getOrder = async (req, res) => {
     console.log(`🔍 [ORDER] Fetching order: ${req.params.id}`);
     const order = await Order.findById(req.params.id).populate("items.product");
     if (!order) {
-      console.warn(`⚠️  [ORDER] Not found: ${req.params.id}`);
+      console.warn(`⚠️ [ORDER] Not found: ${req.params.id}`);
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
@@ -412,7 +421,7 @@ const updateOrderStatus = async (req, res) => {
     );
     const order = await Order.findById(req.params.id);
     if (!order) {
-      console.warn(`⚠️  [STATUS] Order not found: ${req.params.id}`);
+      console.warn(`⚠️ [STATUS] Order not found: ${req.params.id}`);
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
@@ -422,14 +431,17 @@ const updateOrderStatus = async (req, res) => {
     const newStatus = req.body.orderStatus;
 
     order.orderStatus = newStatus;
+
     if (req.body.trackingNumber) {
       order.trackingNumber = req.body.trackingNumber;
       console.log(
         `📦 [STATUS] Tracking number set: ${req.body.trackingNumber}`,
       );
     }
-    if (req.body.deliveryPartner)
+
+    if (req.body.deliveryPartner) {
       order.deliveryPartner = req.body.deliveryPartner;
+    }
 
     if (newStatus === "delivered" && order.paymentStatus !== "paid") {
       order.paymentStatus = "paid";
@@ -452,7 +464,7 @@ const updateOrderStatus = async (req, res) => {
     if (oldStatus !== newStatus && process.env.DISABLE_EMAIL !== "true") {
       setImmediate(async () => {
         console.log(
-          `📧 [EMAIL] Sending status update email for ${order.orderNumber} → ${newStatus}`,
+          `📧 [EMAIL] Sending status update for ${order.orderNumber} → ${newStatus}`,
         );
         try {
           const result = await sendEmail(
@@ -466,7 +478,7 @@ const updateOrderStatus = async (req, res) => {
             );
           } else {
             console.error(
-              `❌ [EMAIL] Status email FAILED → ${order.customer.email}: ${result?.error}`,
+              `❌ [EMAIL] Status email failed → ${order.customer.email}: ${result?.error}`,
             );
           }
         } catch (err) {
@@ -491,10 +503,11 @@ const updatePaymentStatus = async (req, res) => {
       `💳 [PAYMENT] Update — order: ${req.params.id}, status: ${req.body.paymentStatus}`,
     );
     const order = await Order.findById(req.params.id);
-    if (!order)
+    if (!order) {
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
+    }
     order.paymentStatus = req.body.paymentStatus;
     await order.save();
     console.log(
@@ -514,10 +527,11 @@ const sendManualOrderEmail = async (req, res) => {
   try {
     console.log(`📧 [MANUAL EMAIL] Request for order: ${req.params.id}`);
     const order = await Order.findById(req.params.id);
-    if (!order)
+    if (!order) {
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
+    }
     if (process.env.DISABLE_EMAIL === "true") {
       console.log("📧 [MANUAL EMAIL] Skipped — DISABLE_EMAIL=true");
       return res.json({ success: false, message: "Email is disabled" });
@@ -533,9 +547,6 @@ const sendManualOrderEmail = async (req, res) => {
       );
     }
 
-    console.log(
-      `📧 [MANUAL EMAIL] Sending to: ${order.customer.email}, subject: "${subject || "default"}"`,
-    );
     const result = await sendEmail(
       order.customer.email,
       subject || `Update on your order ${order.orderNumber}`,
@@ -632,12 +643,18 @@ const getSalesAnalytics = async (req, res) => {
     const { period = "monthly" } = req.query;
     console.log(`📈 [ANALYTICS] Fetching ${period} sales data`);
     const groupBy =
-      period === "weekly" ? { $week: "$createdAt" } : { $month: "$createdAt" };
+      period === "weekly"
+        ? { $week: "$createdAt" }
+        : { $month: "$createdAt" };
 
     const salesData = await Order.aggregate([
       { $match: { orderStatus: "delivered" } },
       {
-        $group: { _id: groupBy, total: { $sum: "$total" }, count: { $sum: 1 } },
+        $group: {
+          _id: groupBy,
+          total: { $sum: "$total" },
+          count: { $sum: 1 },
+        },
       },
       { $sort: { _id: 1 } },
     ]);
@@ -652,12 +669,12 @@ const getSalesAnalytics = async (req, res) => {
 
 // @desc    Get orders by customer phone number (PUBLIC)
 // @route   GET /api/orders/phone/:phone
-// @access  Public - NO AUTH REQUIRED
+// @access  Public
 const getOrdersByPhone = async (req, res) => {
   try {
     const phoneNumber = req.params.phone;
 
-    // Validate Bangladeshi phone number
+    // ✅ FIX 3: Exact phone match only — no partial matches
     const cleanPhone = phoneNumber.replace(/\D/g, "");
     if (!cleanPhone || !/^01[3-9]\d{8}$/.test(cleanPhone)) {
       return res.status(400).json({
@@ -666,33 +683,23 @@ const getOrdersByPhone = async (req, res) => {
       });
     }
 
-    console.log(
-      `📞 [PUBLIC PHONE SEARCH] Looking for orders with phone: ${cleanPhone}`,
-    );
+    console.log(`📞 [PHONE SEARCH] Looking for orders: ${cleanPhone}`);
 
-    // Find orders with this phone number
-    // Only return necessary fields (no sensitive data)
-    const orders = await Order.find({
-      "customer.phone": {
-        $regex: `${cleanPhone}$|${cleanPhone.slice(-11)}$`,
-        $options: "i",
-      },
-    })
+    const orders = await Order.find({ "customer.phone": cleanPhone })
       .select(
         "orderNumber customer.name customer.phone items.name items.quantity items.price items.total subtotal deliveryCharge total paymentMethod orderStatus createdAt trackingNumber",
       )
       .sort("-createdAt")
-      .limit(50); // Limit to last 50 orders for performance
+      .limit(50);
 
-    // Remove sensitive customer email from response (optional)
     const sanitizedOrders = orders.map((order) => {
       const orderObj = order.toObject();
-      delete orderObj.customer?.email; // Don't expose email publicly
+      delete orderObj.customer?.email;
       return orderObj;
     });
 
     console.log(
-      `✅ [PUBLIC PHONE SEARCH] Found ${sanitizedOrders.length} orders for ${cleanPhone}`,
+      `✅ [PHONE SEARCH] Found ${sanitizedOrders.length} orders for ${cleanPhone}`,
     );
 
     res.json({
@@ -701,7 +708,7 @@ const getOrdersByPhone = async (req, res) => {
       data: sanitizedOrders,
     });
   } catch (error) {
-    console.error("❌ [PUBLIC PHONE SEARCH] Error:", error.message);
+    console.error("❌ [PHONE SEARCH] Error:", error.message);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -713,7 +720,7 @@ module.exports = {
   createOrder,
   getOrders,
   getOrder,
-  getOrdersByPhone, // Add this
+  getOrdersByPhone,
   updateOrderStatus,
   updatePaymentStatus,
   getOrderStats,
