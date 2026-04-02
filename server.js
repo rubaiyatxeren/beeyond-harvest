@@ -9,26 +9,19 @@ const mongoose = require("mongoose");
 const PORT = process.env.PORT || 5000;
 let server;
 
-// Create default admin if not exists
+// ==============================
+// ✅ CREATE DEFAULT ADMIN
+// ==============================
 const createDefaultAdmin = async () => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      console.log(
-        "⏳ Waiting for database connection before creating admin...",
-      );
-      await new Promise((resolve) => {
-        mongoose.connection.once("connected", resolve);
-      });
-    }
-
     if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
       console.warn("⚠️ ADMIN_EMAIL or ADMIN_PASSWORD not set");
       return;
     }
 
-    const adminExists = await Admin.findOne({ email: process.env.ADMIN_EMAIL });
+    const exists = await Admin.findOne({ email: process.env.ADMIN_EMAIL });
 
-    if (!adminExists) {
+    if (!exists) {
       await Admin.create({
         name: "Super Admin",
         email: process.env.ADMIN_EMAIL,
@@ -36,107 +29,132 @@ const createDefaultAdmin = async () => {
         role: "super_admin",
         isActive: true,
       });
-      console.log("✅ Default admin created successfully");
+      console.log("✅ Default admin created");
     } else {
       console.log("✅ Default admin already exists");
     }
-  } catch (error) {
-    console.error("❌ Error creating default admin:", error.message);
+  } catch (err) {
+    console.error("❌ Admin creation failed:", err.message);
   }
 };
 
-// Start the server
+// ==============================
+// ✅ GRACEFUL SHUTDOWN
+// ==============================
+const shutdown = async (signal) => {
+  console.log(`⚠️ Shutdown initiated: ${signal}`);
+
+  try {
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+      console.log("✅ HTTP server closed");
+    }
+
+    if (mongoose.connection.readyState === 1) {
+      await mongoose.connection.close();
+      console.log("✅ MongoDB connection closed");
+    }
+
+    process.exit(signal === "SIGINT" || signal === "SIGTERM" ? 0 : 1);
+  } catch (err) {
+    console.error("❌ Shutdown error:", err.message);
+    process.exit(1);
+  }
+};
+
+// ==============================
+// ✅ START SERVER
+// ==============================
 const startServer = async () => {
   try {
+    // 🔥 Connect DB (must succeed)
     await connectDB();
+
+    if (mongoose.connection.readyState !== 1) {
+      throw new Error("Database not connected");
+    }
+
+    console.log("✅ MongoDB connected");
+
     await createDefaultAdmin();
 
+    // 🔥 Start server
     server = app.listen(PORT, "0.0.0.0", () => {
-      console.log(
-        `🚀 Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`,
-      );
-      console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
-      console.log(`✅ Bound to 0.0.0.0:${PORT} - Ready for Render`);
+      console.log(`🚀 Server running (${process.env.NODE_ENV || "dev"})`);
+      console.log(`🌐 Port: ${PORT}`);
+      console.log(`❤️ Health: /health`);
     });
-  } catch (error) {
-    console.error("❌ Failed to start server:", error.message);
-    process.exit(1);
+
+    // 🔥 Catch server-level errors
+    server.on("error", (err) => {
+      console.error("❌ Server error:", err.message);
+      shutdown("SERVER_ERROR");
+    });
+  } catch (err) {
+    console.error("❌ Startup failed:", err.message);
+    process.exit(1); // Let Render restart cleanly
   }
 };
 
 startServer();
 
-// ✅ FIXED: Graceful shutdown for Mongoose 7+
+// ==============================
+// 🔥 ERROR HANDLING (SMART)
+// ==============================
+
 process.on("unhandledRejection", (err) => {
-  console.error(`❌ Unhandled Rejection: ${err.message}`);
-  console.error(err.stack);
-  if (server) {
-    server.close(async () => {
-      try {
-        await mongoose.connection.close();
-        console.log("✅ MongoDB connection closed");
-      } catch (e) {
-        console.error("Error closing MongoDB:", e.message);
-      }
-      process.exit(1);
-    });
-  } else {
-    process.exit(1);
+  console.error("❌ Unhandled Rejection:", err.message, err.stack);
+
+  if (
+    err?.name === "MongoNetworkError" ||
+    err?.name === "MongooseServerSelectionError"
+  ) {
+    console.error("❌ Critical DB error → restarting...");
+    shutdown("UNHANDLED_REJECTION");
   }
 });
 
 process.on("uncaughtException", (err) => {
-  console.error(`❌ Uncaught Exception: ${err.message}`);
-  console.error(err.stack);
-  if (server) {
-    server.close(async () => {
-      try {
-        await mongoose.connection.close();
-        console.log("✅ MongoDB connection closed");
-      } catch (e) {
-        console.error("Error closing MongoDB:", e.message);
-      }
-      process.exit(1);
-    });
-  } else {
-    process.exit(1);
+  console.error("❌ Uncaught Exception:", err.message, err.stack);
+
+  if (
+    err.code === "ERR_USE_AFTER_FREE" ||
+    err.code === "ENOMEM" ||
+    err?.name === "MongoNetworkError" ||
+    err?.name === "MongooseServerSelectionError"
+  ) {
+    console.error("❌ Fatal error → restarting...");
+    shutdown("UNCAUGHT_EXCEPTION");
   }
 });
 
-// ✅ FIXED: SIGTERM handler
-process.on("SIGTERM", async () => {
-  console.log("👋 SIGTERM received. Closing server gracefully...");
-  if (server) {
-    server.close(async () => {
-      console.log("✅ HTTP server closed");
-      try {
-        await mongoose.connection.close();
-        console.log("✅ MongoDB connection closed");
-      } catch (err) {
-        console.error("❌ Error closing MongoDB:", err.message);
-      }
-      process.exit(0);
-    });
-  } else {
-    process.exit(0);
-  }
+// ==============================
+// 🔥 RENDER SIGNALS
+// ==============================
+
+process.on("SIGTERM", () => {
+  console.log("👋 SIGTERM received");
+  shutdown("SIGTERM");
 });
 
-// ✅ FIXED: SIGINT handler (Ctrl+C)
-process.on("SIGINT", async () => {
-  console.log("👋 SIGINT received. Closing server gracefully...");
-  if (server) {
-    server.close(async () => {
-      console.log("✅ HTTP server closed");
-      try {
-        await mongoose.connection.close();
-        console.log("✅ MongoDB connection closed");
-      } catch (err) {
-        console.error("❌ Error closing MongoDB:", err.message);
-      }
-      process.exit(0);
-    });
-  } else {
-    process.exit(0);
-  }
+process.on("SIGINT", () => {
+  console.log("👋 SIGINT received");
+  shutdown("SIGINT");
+});
+
+// ==============================
+// 🔥 MONGOOSE EVENTS (STABLE)
+// ==============================
+
+mongoose.connection.on("connected", () => {
+  console.log("🟢 MongoDB connected");
+});
+
+mongoose.connection.on("error", (err) => {
+  console.error("🔴 MongoDB error:", err.message);
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.warn("🟡 MongoDB disconnected — retrying...");
+  // DO NOT exit — allow reconnect
 });
