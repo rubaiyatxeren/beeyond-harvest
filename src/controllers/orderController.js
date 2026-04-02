@@ -155,50 +155,51 @@ const createOrder = async (req, res) => {
   try {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("📦 [ORDER] New order request received");
-    console.log("📦 [ORDER] Body:", JSON.stringify(req.body, null, 2));
 
     const { items, customer, paymentMethod, deliveryCharge } = req.body;
 
+    // ✅ VALIDATION
     if (!items || !items.length) {
-      console.warn("⚠️  [ORDER] Rejected — no items");
       return res
         .status(400)
         .json({ success: false, message: "No items in order" });
     }
-    if (!customer || !customer.name || !customer.email || !customer.phone) {
-      console.warn("⚠️  [ORDER] Rejected — missing customer fields:", {
-        name: !!customer?.name,
-        email: !!customer?.email,
-        phone: !!customer?.phone,
+
+    if (!customer?.name || !customer?.email || !customer?.phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer name, email, and phone are required",
       });
-      return res
-        .status(400)
-        .json({ success: false, message: "Customer information is required" });
     }
 
-    console.log(
-      `👤 [ORDER] Customer: ${customer.name} <${customer.email}> | ${customer.phone}`,
-    );
-    console.log(`🛒 [ORDER] Items count: ${items.length}`);
+    // ==============================
+    // 🔥 FETCH ALL PRODUCTS IN ONE QUERY
+    // ==============================
+    const productIds = items.map((i) => i.product);
+
+    const products = await Product.find({
+      _id: { $in: productIds },
+    }).lean();
+
+    const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
     let subtotal = 0;
     const orderItems = [];
 
+    // ==============================
+    // 🔥 PROCESS ITEMS
+    // ==============================
     for (const item of items) {
-      console.log(`🔍 [ORDER] Looking up product: ${item.product}`);
-      const product = await Product.findById(item.product);
+      const product = productMap.get(item.product);
 
       if (!product) {
-        console.error(`❌ [ORDER] Product not found: ${item.product}`);
         return res.status(404).json({
           success: false,
-          message: `Product ${item.product} not found`,
+          message: `Product not found: ${item.product}`,
         });
       }
+
       if (product.stock < item.quantity) {
-        console.warn(
-          `⚠️  [ORDER] Insufficient stock — "${product.name}" has ${product.stock}, requested ${item.quantity}`,
-        );
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for "${product.name}". Available: ${product.stock}`,
@@ -207,28 +208,32 @@ const createOrder = async (req, res) => {
 
       const total = product.price * item.quantity;
       subtotal += total;
+
       orderItems.push({
-        product: item.product,
+        product: product._id,
         name: product.name,
         sku: product.sku,
         quantity: item.quantity,
         price: product.price,
         total,
       });
-      console.log(`   ✅ ${product.name} x${item.quantity} = ${total} ৳`);
     }
 
     const total = subtotal + (deliveryCharge || 60);
-    console.log(
-      `💰 [ORDER] Subtotal: ${subtotal} ৳ | Delivery: ${deliveryCharge || 60} ৳ | Total: ${total} ৳`,
-    );
 
+    // ==============================
+    // 🔥 GENERATE ORDER NUMBER (SAFE)
+    // ==============================
     const date = new Date();
     const count = await Order.countDocuments();
-    const orderNumber = `ORD-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}-${String(count + 1).padStart(5, "0")}`;
-    console.log(`🔢 [ORDER] Generated order number: ${orderNumber}`);
 
-    console.log("💾 [ORDER] Saving to database...");
+    const orderNumber = `ORD-${date.getFullYear()}${String(
+      date.getMonth() + 1,
+    ).padStart(2, "0")}-${String(count + 1).padStart(5, "0")}`;
+
+    // ==============================
+    // 🔥 CREATE ORDER
+    // ==============================
     const order = await Order.create({
       orderNumber,
       customer: {
@@ -245,95 +250,76 @@ const createOrder = async (req, res) => {
       paymentStatus: "pending",
       orderStatus: "pending",
     });
-    console.log(`✅ [ORDER] Saved — ID: ${order._id}`);
 
-    console.log("📦 [ORDER] Updating product stock...");
-    for (const item of items) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: -item.quantity },
-      });
-    }
-    console.log("✅ [ORDER] Stock updated");
+    console.log(`✅ Order created: ${order.orderNumber}`);
 
-    console.log(
-      `🎉 [ORDER] ${orderNumber} created successfully — responding to client`,
-    );
+    // ==============================
+    // 🔥 BULK STOCK UPDATE (FAST)
+    // ==============================
+    const bulkOps = items.map((item) => ({
+      updateOne: {
+        filter: { _id: item.product },
+        update: { $inc: { stock: -item.quantity } },
+      },
+    }));
+
+    await Product.bulkWrite(bulkOps);
+
+    console.log("✅ Stock updated");
+
+    // ==============================
+    // ✅ RESPONSE FIRST (FAST API)
+    // ==============================
     res.status(201).json({
       success: true,
       data: order,
-      message: "Order created successfully.",
+      message: "Order created successfully",
     });
 
-    // 🔔 Background emails
-    if (process.env.DISABLE_EMAIL === "true") {
-      console.log("📧 [EMAIL] Skipped — DISABLE_EMAIL=true");
-      return;
-    }
+    // ==============================
+    // 🔔 BACKGROUND EMAIL (NON-BLOCKING)
+    // ==============================
+    if (process.env.DISABLE_EMAIL === "true") return;
 
     setImmediate(async () => {
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-      console.log(
-        `📧 [EMAIL] Starting background email job for ${orderNumber}`,
-      );
-
       try {
+        console.log(`📧 Sending emails for ${order.orderNumber}`);
+
         // Customer email
-        console.log(
-          `📧 [EMAIL] Sending confirmation to customer: ${order.customer.email}`,
-        );
-        const customerResult = await sendEmail(
+        await sendEmail(
           order.customer.email,
           `🎉 Order Confirmed - ${order.orderNumber}`,
           generateOrderEmailTemplate(order, "new_order"),
         );
-        if (customerResult?.success) {
-          console.log(
-            `✅ [EMAIL] Customer email sent → ${order.customer.email}`,
-          );
-        } else {
-          console.error(
-            `❌ [EMAIL] Customer email FAILED → ${order.customer.email}`,
-          );
-          console.error(`   Reason: ${customerResult?.error}`);
-        }
 
         // Admin emails
         const adminEmails = (
           process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
         ).split(",");
-        console.log(
-          `📧 [EMAIL] Sending admin notification to: ${adminEmails.join(", ")}`,
-        );
+
         const adminHtml = generateAdminEmailTemplate(order, "new_order");
 
-        for (const email of adminEmails) {
-          const adminResult = await sendEmail(
-            email.trim(),
-            `🆕 New Order #${order.orderNumber} - Action Required`,
-            adminHtml,
-          );
-          if (adminResult?.success) {
-            console.log(`✅ [EMAIL] Admin email sent → ${email.trim()}`);
-          } else {
-            console.error(`❌ [EMAIL] Admin email FAILED → ${email.trim()}`);
-            console.error(`   Reason: ${adminResult?.error}`);
-          }
-        }
-
-        console.log(`📧 [EMAIL] Job complete for ${orderNumber}`);
-        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-      } catch (emailError) {
-        console.error(
-          "❌ [EMAIL] Unexpected error in background job:",
-          emailError.message,
+        await Promise.all(
+          adminEmails.map((email) =>
+            sendEmail(
+              email.trim(),
+              `🆕 New Order #${order.orderNumber}`,
+              adminHtml,
+            ),
+          ),
         );
-        console.error(emailError.stack);
+
+        console.log(`✅ Emails sent for ${order.orderNumber}`);
+      } catch (err) {
+        console.error("❌ Email error:", err.message);
       }
     });
   } catch (error) {
-    console.error("❌ [ORDER] Create order crashed:", error.message);
-    console.error(error.stack);
-    res.status(500).json({ success: false, message: error.message });
+    console.error("❌ Create order error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create order",
+    });
   }
 };
 
@@ -342,13 +328,17 @@ const createOrder = async (req, res) => {
 // @access  Private
 const getOrders = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+
+    // 🔥 LIMIT PROTECTION (VERY IMPORTANT)
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+
     const skip = (page - 1) * limit;
     let query = {};
 
     if (req.query.orderStatus) query.orderStatus = req.query.orderStatus;
     if (req.query.paymentStatus) query.paymentStatus = req.query.paymentStatus;
+
     if (req.query.search) {
       query.$or = [
         { orderNumber: { $regex: req.query.search, $options: "i" } },
@@ -357,27 +347,34 @@ const getOrders = async (req, res) => {
       ];
     }
 
-    console.log(
-      `📋 [ORDERS] Fetching page ${page}, limit ${limit}, query:`,
-      JSON.stringify(query),
-    );
+    console.log(`📋 Fetching page ${page}, limit ${limit}`);
+
     const [orders, total] = await Promise.all([
       Order.find(query)
+        .select(
+          "orderNumber customer total orderStatus paymentStatus createdAt trackingNumber items",
+        )
         .populate("items.product", "name images")
         .sort("-createdAt")
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(), // 🔥 HUGE PERFORMANCE BOOST
+
       Order.countDocuments(query),
     ]);
-    console.log(`✅ [ORDERS] Returned ${orders.length}/${total} orders`);
 
     res.json({
       success: true,
       data: orders,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
-    console.error("❌ [ORDERS] Get orders error:", error.message);
+    console.error("❌ Get orders error:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
