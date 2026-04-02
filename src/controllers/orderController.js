@@ -290,6 +290,8 @@ const createOrder = async (req, res) => {
           order.customer.email,
           `🎉 Order Confirmed - ${order.orderNumber}`,
           generateOrderEmailTemplate(order, "new_order"),
+        ).catch((err) =>
+          console.error("❌ Customer email failed:", err.message),
         );
 
         // Admin emails
@@ -299,13 +301,13 @@ const createOrder = async (req, res) => {
 
         const adminHtml = generateAdminEmailTemplate(order, "new_order");
 
-        await Promise.all(
-          adminEmails.map((email) =>
-            sendEmail(
-              email.trim(),
-              `🆕 New Order #${order.orderNumber}`,
-              adminHtml,
-            ),
+        adminEmails.map((email) =>
+          sendEmail(
+            email.trim(),
+            `🆕 New Order #${order.orderNumber}`,
+            adminHtml,
+          ).catch((err) =>
+            console.error(`❌ Admin email failed (${email}):`, err.message),
           ),
         );
 
