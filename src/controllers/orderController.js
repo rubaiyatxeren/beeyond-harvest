@@ -1404,7 +1404,7 @@ const sendBulkPromotionalEmail = async (req, res) => {
   }
 };
 
-// Generate promotional email template - FULLY RESPONSIVE (Mobile Optimized)
+// Generate promotional email template
 const generatePromotionalEmailTemplate = (
   subject,
   message,
@@ -1418,259 +1418,128 @@ const generatePromotionalEmailTemplate = (
 <html lang="bn">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=yes"/>
-<meta name="format-detection" content="telephone=no,date=no,address=no,email=no"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${subject}</title>
-<style>
-  /* RESET & GLOBAL */
-  * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-  }
-  body {
-    margin: 0;
-    padding: 0;
-    background: #F5F0E8;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-  /* MOBILE-FIRST RESPONSIVE TABLES */
-  .container {
-    width: 100%;
-    max-width: 600px;
-    margin: 0 auto;
-  }
-  .stack-cell {
-    display: block;
-    width: 100%;
-  }
-  /* Responsive trust badges - mobile stack */
-  @media only screen and (max-width: 480px) {
-    .trust-row {
-      display: flex !important;
-      flex-direction: column !important;
-    }
-    .trust-cell {
-      width: 100% !important;
-      display: block !important;
-      border-bottom: 1px solid #F0E8D8 !important;
-    }
-    .trust-cell:last-child {
-      border-bottom: none !important;
-    }
-    .trust-divider {
-      display: none !important;
-    }
-    .btn-spacing {
-      display: block !important;
-      width: 100% !important;
-      text-align: center !important;
-    }
-    .header-logo {
-      flex-direction: column !important;
-      text-align: center !important;
-    }
-    .header-icon {
-      margin-bottom: 10px !important;
-    }
-    .offer-padding {
-      padding: 20px 16px !important;
-    }
-    .coupon-code {
-      font-size: 18px !important;
-      letter-spacing: 1px !important;
-      word-break: break-all !important;
-    }
-    .main-title {
-      font-size: 24px !important;
-      line-height: 1.3 !important;
-    }
-    .body-padding {
-      padding: 0 20px !important;
-    }
-    .footer-links a {
-      display: inline-block !important;
-      margin: 3px !important;
-    }
-    .cta-button {
-      display: block !important;
-      width: 100% !important;
-      text-align: center !important;
-      padding: 14px 20px !important;
-      font-size: 14px !important;
-    }
-    .badge-text {
-      font-size: 9px !important;
-    }
-  }
-  /* Button hover effects (desktop only) */
-  @media (hover: hover) {
-    .btn-hover:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-    }
-  }
-  /* Prevent Outlook/Windows font scaling */
-  .ExternalClass, .ReadMsgBody {
-    width: 100%;
-    background-color: #F5F0E8;
-  }
-  /* Apple Mail/iOS fixes */
-  u + .body {
-    background-color: #F5F0E8;
-  }
-</style>
 </head>
-<body style="margin:0;padding:0;background:#F5F0E8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<body style="margin:0;padding:0;background:#F5F0E8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
 
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F5F0E8;padding:16px 12px;" bgcolor="#F5F0E8">
-  <tr>
-    <td align="center" style="padding:0;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;margin:0 auto;" class="container">
-        
-        <!-- HEADER SECTION -->
-        <tr>
-          <td style="padding:0;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,#0D1B3E 0%,#1A2E5A 60%,#0D1B3E 100%);border-radius:28px 28px 0 0;overflow:hidden;">
-              <tr>
-                <td style="padding:32px 24px 24px;" align="center">
-                  <!-- Logo Area - Responsive Flex -->
-                  <table cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 20px;">
-                    <tr>
-                      <td style="background:linear-gradient(135deg,#F5A623,#C47F11);border-radius:16px;width:48px;height:48px;text-align:center;vertical-align:middle;font-size:24px;line-height:48px;">🐝</td>
-                      <td style="padding-left:12px;text-align:left;vertical-align:middle;">
-                        <div style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.3px;">BeeHarvest</div>
-                        <div style="font-size:10px;color:#FDD882;margin-top:2px;">বাংলাদেশের বিশ্বস্ত অনলাইন শপ</div>
-                      </td>
-                    </tr>
-                  </table>
-                  <h1 style="margin:0 0 12px;color:#ffffff;font-size:26px;font-weight:800;line-height:1.3;" class="main-title">✨ Special Offer Just for You!</h1>
-                  <p style="margin:0 0 28px;color:rgba(255,255,255,0.7);font-size:14px;line-height:1.5;">Hello <strong style="color:#FDD882;">{name}</strong>, we have something exciting for you!</p>
-                </td>
-              </tr>
-              <tr>
-                <td style="line-height:0;font-size:0;">
-                  <svg width="100%" height="36" viewBox="0 0 600 36" preserveAspectRatio="none" style="display:block;">
-                    <path d="M0,0 C150,36 450,0 600,36 L600,36 L0,36 Z" fill="#FFF9F0"/>
-                  </svg>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;padding:24px 16px;">
+<tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;">
 
-        <!-- BODY SECTION -->
-        <tr>
-          <td style="background:#FFF9F0;padding:0;" bgcolor="#FFF9F0">
-            <div style="padding:28px 28px 0;" class="body-padding">
-              <p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.6;">
-                ${message}
-              </p>
-            </div>
+  <!-- Header -->
+  <tr><td>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E 0%,#1A2E5A 60%,#0D1B3E 100%);border-radius:24px 24px 0 0;overflow:hidden;">
+      <tr><td style="padding:40px 40px 20px;text-align:center;">
+        <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#F5A623,#C47F11);border-radius:14px;width:52px;height:52px;text-align:center;vertical-align:middle;font-size:26px;line-height:52px;">🐝</td>
+            <td style="padding-left:12px;text-align:left;vertical-align:middle;">
+              <div style="font-size:22px;font-weight:800;color:white;letter-spacing:0.5px;">BeeHarvest</div>
+              <div style="font-size:11px;color:#FDD882;margin-top:2px;">বাংলাদেশের বিশ্বস্ত অনলাইন শপ</div>
+            </td>
+          </tr>
+        </table>
+        <h1 style="margin:0 0 10px;color:white;font-size:28px;font-weight:800;line-height:1.25;">✨ Special Offer Just for You!</h1>
+        <p style="margin:0 0 32px;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.6;">Hello <strong style="color:#FDD882;">{name}</strong>, we have something exciting for you!</p>
+      </td></tr>
+      <tr><td style="line-height:0;font-size:0;">
+        <svg width="100%" height="40" viewBox="0 0 600 40" preserveAspectRatio="none">
+          <path d="M0,0 C150,40 450,0 600,40 L600,40 L0,40 Z" fill="#FFF9F0"/>
+        </svg>
+      </td></tr>
+    </table>
+  </td></tr>
 
-            <!-- OFFER CARD (if present) -->
-            ${
-              hasOffer
-                ? `
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
-              <tr>
-                <td style="padding:0 28px;" class="body-padding">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:20px;overflow:hidden;">
-                    <tr>
-                      <td style="padding:24px 24px;" align="center" class="offer-padding">
-                        <div style="font-size:13px;color:rgba(255,255,255,0.65);margin-bottom:8px;letter-spacing:1px;">🎉 SPECIAL OFFER</div>
-                        <div style="font-size:22px;font-weight:800;color:#FDD882;margin-bottom:10px;line-height:1.3;">${offerDetails}</div>
-                        ${
-                          hasCoupon
-                            ? `
-                        <div style="background:rgba(255,255,255,0.08);border-radius:14px;padding:12px 16px;margin-top:12px;">
-                          <div style="font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:1.5px;margin-bottom:6px;">USE COUPON CODE</div>
-                          <div style="font-family:'Courier New',monospace;font-size:22px;font-weight:800;color:#FDD882;letter-spacing:2px;word-break:break-all;" class="coupon-code">${couponCode}</div>
-                        </div>
-                        `
-                            : ""
-                        }
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-            `
-                : ""
-            }
+  <!-- Body -->
+  <tr><td style="background:#FFF9F0;padding:0 32px;">
+    
+    <div style="padding:28px 0 0;">
+      <p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.7;">
+        ${message}
+      </p>
+    </div>
 
-            <!-- CTA BUTTON - FULL WIDTH ON MOBILE -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
-              <tr>
-                <td align="center" style="padding:0 28px;" class="body-padding">
-                  <a href="${process.env.FRONTEND_URL || "https://beeharvest.com"}/shop" 
-                     class="btn-hover cta-button"
-                     style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:14px 36px;border-radius:50px;font-size:15px;font-weight:800;letter-spacing:0.5px;transition:all 0.2s ease;">
-                    🛍️ Shop Now & Save
-                  </a>
-                </td>
-              </tr>
-            </table>
+    ${
+      hasOffer
+        ? `
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:16px;margin-bottom:20px;">
+      <tr><td style="padding:24px 28px;text-align:center;">
+        <div style="font-size:14px;color:rgba(255,255,255,0.7);margin-bottom:8px;">🎉 Special Offer</div>
+        <div style="font-size:24px;font-weight:800;color:#FDD882;margin-bottom:8px;">${offerDetails}</div>
+        ${
+          hasCoupon
+            ? `
+          <div style="background:rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-top:12px;">
+            <div style="font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:1px;">USE COUPON CODE</div>
+            <div style="font-family:'Courier New',monospace;font-size:24px;font-weight:800;color:#FDD882;letter-spacing:2px;">${couponCode}</div>
+          </div>
+        `
+            : ""
+        }
+      </td></tr>
+    </table>
+    `
+        : ""
+    }
 
-            <!-- TRUST BADGES - FULLY RESPONSIVE (stacks on mobile) -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:32px;border:1px solid #F0E8D8;border-radius:18px;overflow:hidden;background:#FFF9F0;">
-              <tr class="trust-row" style="display:table-row;">
-                <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;" class="trust-cell">
-                  <div style="font-size:28px;line-height:1;margin-bottom:8px;">🚚</div>
-                  <div style="font-size:12px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Free Delivery</div>
-                  <div style="font-size:10px;color:#6B7A99;" class="badge-text">On orders over ৳1000</div>
-                </td>
-                <td width="1" style="background:#F0E8D8;padding:0;" class="trust-divider"></td>
-                <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;" class="trust-cell">
-                  <div style="font-size:28px;line-height:1;margin-bottom:8px;">🛡️</div>
-                  <div style="font-size:12px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Secure Payment</div>
-                  <div style="font-size:10px;color:#6B7A99;" class="badge-text">100% Protected</div>
-                </td>
-                <td width="1" style="background:#F0E8D8;padding:0;" class="trust-divider"></td>
-                <td width="34%" align="center" style="padding:16px 8px;vertical-align:top;" class="trust-cell">
-                  <div style="font-size:28px;line-height:1;margin-bottom:8px;">↩️</div>
-                  <div style="font-size:12px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Easy Returns</div>
-                  <div style="font-size:10px;color:#6B7A99;" class="badge-text">7 days hassle-free</div>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
+    <!-- CTA Button -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+      <tr><td align="center">
+        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/shop"
+          style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:800;letter-spacing:0.3px;">
+          🛍️ Shop Now & Save
+        </a>
+      </td></tr>
+    </table>
 
-        <!-- FOOTER SECTION -->
-        <tr>
-          <td style="padding:0;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0D1B3E;border-radius:0 0 28px 28px;overflow:hidden;" bgcolor="#0D1B3E">
-              <tr>
-                <td style="padding:28px 24px 32px;" align="center">
-                  <!-- Social Links - responsive wrap -->
-                  <div style="margin-bottom:20px;" class="footer-links">
-                    <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);text-decoration:none;padding:7px 16px;border-radius:30px;font-size:12px;margin:0 4px;transition:all 0.2s;">Facebook</a>
-                    <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);text-decoration:none;padding:7px 16px;border-radius:30px;font-size:12px;margin:0 4px;transition:all 0.2s;">WhatsApp</a>
-                    <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);text-decoration:none;padding:7px 16px;border-radius:30px;font-size:12px;margin:0 4px;transition:all 0.2s;">Instagram</a>
-                  </div>
-                  <p style="margin:0 0 10px;font-size:13px;color:rgba(255,255,255,0.55);line-height:1.5;">🌾 BeeHarvest — সরাসরি ফার্ম থেকে আপনার দরজায়</p>
-                  <p style="margin:0 0 12px;font-size:12px;color:rgba(255,255,255,0.4);">সাহায্যের জন্য: <a href="mailto:support@beeharvest.com.bd" style="color:#FDD882;text-decoration:none;">support@beeharvest.com.bd</a></p>
-                  <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.3);">© ${new Date().getFullYear()} BeeHarvest. সর্বস্বত্ব সংরক্ষিত।</p>
-                  <p style="margin-top:14px;font-size:10px;color:rgba(255,255,255,0.2);">You're receiving this email because you've shopped with BeeHarvest.</p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
+    <!-- Trust badges -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;border:1px solid #F0E8D8;border-radius:14px;overflow:hidden;">
+      <tr>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🚚</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Free Delivery</div>
+          <div style="font-size:10px;color:#6B7A99;">On orders over ৳1000</div>
+        </td>
+        <td width="1" style="background:#F0E8D8;padding:0;"></td>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🛡️</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Secure Payment</div>
+          <div style="font-size:10px;color:#6B7A99;">100% Protected</div>
+        </td>
+        <td width="1" style="background:#F0E8D8;padding:0;"></td>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">↩️</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Easy Returns</div>
+          <div style="font-size:10px;color:#6B7A99;">7 days hassle-free</div>
+        </td>
+      </tr>
+    </table>
 
-        <!-- SPACER -->
-        <tr>
-          <td style="height:20px;font-size:0;">&nbsp;</td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0D1B3E;border-radius:0 0 24px 24px;">
+      <tr><td style="padding:30px 32px;text-align:center;">
+        <div style="margin-bottom:16px;">
+          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Facebook</a>
+          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">WhatsApp</a>
+          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Instagram</a>
+        </div>
+        <p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;">🌾 BeeHarvest — সরাসরি ফার্ম থেকে আপনার দরজায়</p>
+        <p style="margin:0 0 10px;font-size:12px;color:rgba(255,255,255,0.35);">সাহায্যের জন্য: <a href="mailto:support@beeharvest.com.bd" style="color:#FDD882;text-decoration:none;">support@beeharvest.com.bd</a></p>
+        <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);">© ${new Date().getFullYear()} BeeHarvest. সর্বস্বত্ব সংরক্ষিত।</p>
+        <p style="margin-top:12px;font-size:10px;color:rgba(255,255,255,0.15);">You're receiving this email because you've shopped with BeeHarvest.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+
+  <tr><td style="height:24px;"></td></tr>
+
 </table>
-
+</td></tr>
+</table>
 </body>
 </html>`;
 };
