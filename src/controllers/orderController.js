@@ -148,22 +148,18 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 
-// @desc    Create order (OPTIMIZED - non-blocking)
+// @desc    Create order
 // @route   POST /api/orders
 // @access  Public
-// @desc    Create order - ULTRA FAST, NO BACKGROUND PROCESSING
-// @desc    Create order - WILL SEND EMAILS, NO CRASHES
 const createOrder = async (req, res) => {
-  const startTime = Date.now();
-
   try {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("📦 [ORDER] New order request received");
 
     const { items, customer, paymentMethod, deliveryCharge } = req.body;
 
-    // Validation
-    if (!items?.length) {
+    // ✅ VALIDATION
+    if (!items || !items.length) {
       return res
         .status(400)
         .json({ success: false, message: "No items in order" });
@@ -176,30 +172,43 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Fetch products
+    // ==============================
+    // 🔥 FETCH ALL PRODUCTS IN ONE QUERY
+    // ==============================
     const productIds = items.map((i) => i.product);
-    const products = await Product.find({ _id: { $in: productIds } }).lean();
+
+    const products = await Product.find({
+      _id: { $in: productIds },
+    }).lean();
+
     const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
     let subtotal = 0;
     const orderItems = [];
 
+    // ==============================
+    // 🔥 PROCESS & VALIDATE ITEMS
+    // ==============================
     for (const item of items) {
       const product = productMap.get(item.product);
+
       if (!product) {
         return res.status(404).json({
           success: false,
           message: `Product not found: ${item.product}`,
         });
       }
+
       if (product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for "${product.name}"`,
+          message: `Insufficient stock for "${product.name}". Available: ${product.stock}`,
         });
       }
+
       const total = product.price * item.quantity;
       subtotal += total;
+
       orderItems.push({
         product: product._id,
         name: product.name,
@@ -210,13 +219,24 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const finalDeliveryCharge = deliveryCharge || 60;
-    const total = subtotal + finalDeliveryCharge;
-    const now = new Date();
-    const fiveDigit = Math.floor(10000 + Math.random() * 90000);
-    const orderNumber = `ORD-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${fiveDigit}`;
+    const total = subtotal + (deliveryCharge || 60);
 
-    // Create order
+    // ==============================
+    // ✅ FIX 1: ORDER NUMBER — no race condition
+    // ==============================
+    const date = new Date();
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, "0");
+
+    const orderNumber = `ORD-${date.getFullYear()}${String(
+      date.getMonth() + 1,
+    ).padStart(2, "0")}-${timestamp}${random}`;
+
+    // ==============================
+    // 🔥 CREATE ORDER
+    // ==============================
     const order = await Order.create({
       orderNumber,
       customer: {
@@ -227,52 +247,88 @@ const createOrder = async (req, res) => {
       },
       items: orderItems,
       subtotal,
-      deliveryCharge: finalDeliveryCharge,
+      deliveryCharge: deliveryCharge || 60,
       total,
       paymentMethod: paymentMethod || "cash_on_delivery",
       paymentStatus: "pending",
       orderStatus: "pending",
     });
 
-    console.log(
-      `✅ Order created: ${order.orderNumber} in ${Date.now() - startTime}ms`,
-    );
+    console.log(`✅ Order created: ${order.orderNumber}`);
 
-    // Update stock
+    // ==============================
+    // ✅ FIX 2: ATOMIC STOCK UPDATE — prevents overselling
+    // ==============================
     const bulkOps = items.map((item) => ({
       updateOne: {
         filter: { _id: item.product, stock: { $gte: item.quantity } },
         update: { $inc: { stock: -item.quantity } },
       },
     }));
-    await Product.bulkWrite(bulkOps);
 
-    // ✅ SEND RESPONSE IMMEDIATELY
+    const stockResult = await Product.bulkWrite(bulkOps);
+
+    if (stockResult.modifiedCount !== items.length) {
+      // Roll back order if stock was insufficient
+      await Order.findByIdAndDelete(order._id);
+      console.warn("⚠️ Stock mismatch — order rolled back");
+      return res.status(400).json({
+        success: false,
+        message: "Some items went out of stock. Please try again.",
+      });
+    }
+
+    console.log("✅ Stock updated atomically");
+
+    // ==============================
+    // ✅ RESPONSE FIRST (FAST API)
+    // ==============================
     res.status(201).json({
       success: true,
       data: order,
       message: "Order created successfully",
     });
 
-    // 🔥 SEND EMAILS IN BACKGROUND - WILL NOT BLOCK OR CRASH
-    // Customer email
-    sendEmail(
-      order.customer.email,
-      `🎉 Order Confirmed - ${order.orderNumber}`,
-      generateOrderEmailTemplate(order, "new_order"),
-    );
+    // ==============================
+    // 🔔 BACKGROUND EMAIL (NON-BLOCKING)
+    // ==============================
+    if (process.env.DISABLE_EMAIL === "true") return;
 
-    // Admin emails
-    const adminEmails = (
-      process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
-    ).split(",");
-    const adminHtml = generateAdminEmailTemplate(order, "new_order");
+    setImmediate(async () => {
+      try {
+        console.log(`📧 Sending emails for ${order.orderNumber}`);
 
-    adminEmails.forEach((email) => {
-      sendEmail(email.trim(), `🆕 New Order #${order.orderNumber}`, adminHtml);
+        // Customer email
+        await sendEmail(
+          order.customer.email,
+          `🎉 Order Confirmed - ${order.orderNumber}`,
+          generateOrderEmailTemplate(order, "new_order"),
+        ).catch((err) =>
+          console.error("❌ Customer email failed:", err.message),
+        );
+
+        // Admin emails
+        const adminEmails = (
+          process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
+        ).split(",");
+
+        const adminHtml = generateAdminEmailTemplate(order, "new_order");
+
+        adminEmails.map((email) =>
+          sendEmail(
+            email.trim(),
+            `🆕 New Order #${order.orderNumber}`,
+            adminHtml,
+          ).catch((err) =>
+            console.error(`❌ Admin email failed (${email}):`, err.message),
+          ),
+        );
+
+        console.log(`✅ Emails sent for ${order.orderNumber}`);
+      } catch (err) {
+        console.error("❌ Email error:", err.message);
+      }
     });
-
-    console.log(`📧 Emails triggered for ${order.orderNumber}`);
   } catch (error) {
     console.error("❌ Create order error:", error.message);
     res.status(500).json({
@@ -404,13 +460,13 @@ const updateOrderStatus = async (req, res) => {
       message: `Order status updated to ${newStatus}${newStatus === "delivered" ? " & payment auto-completed" : ""}`,
     });
 
-    // 🔔 Background status email - CRASH-PROOF
-    if (oldStatus !== newStatus) {
-      (async () => {
+    // 🔔 Background status email
+    if (oldStatus !== newStatus && process.env.DISABLE_EMAIL !== "true") {
+      setImmediate(async () => {
+        console.log(
+          `📧 [EMAIL] Sending status update for ${order.orderNumber} → ${newStatus}`,
+        );
         try {
-          console.log(
-            `📧 [EMAIL] Status update for ${order.orderNumber} → ${newStatus}`,
-          );
           const result = await sendEmail(
             order.customer.email,
             `📦 Order ${order.orderNumber} Status Updated to ${newStatus.toUpperCase()}`,
@@ -418,16 +474,19 @@ const updateOrderStatus = async (req, res) => {
           );
           if (result?.success) {
             console.log(
-              `✅ [EMAIL] Status email sent to ${order.customer.email}`,
+              `✅ [EMAIL] Status email sent → ${order.customer.email}`,
+            );
+          } else {
+            console.error(
+              `❌ [EMAIL] Status email failed → ${order.customer.email}: ${result?.error}`,
             );
           }
         } catch (err) {
-          // Silent fail - email error doesn't affect status update
-          console.log(
-            `📧 [EMAIL] Status email error (ignored): ${err.message}`,
-          );
+          console.error("❌ [EMAIL] Status email crashed:", err.message);
         }
-      })();
+      });
+    } else if (oldStatus === newStatus) {
+      console.log("📧 [EMAIL] Skipped — status unchanged");
     }
   } catch (error) {
     console.error("❌ [STATUS] Update crashed:", error.message);
