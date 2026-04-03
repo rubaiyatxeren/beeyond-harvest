@@ -329,10 +329,19 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
             <td style="padding:5px 0;color:rgba(255,255,255,0.6);font-size:13px;">পণ্যের মূল্য</td>
             <td style="padding:5px 0;text-align:right;color:rgba(255,255,255,0.6);font-size:13px;">${order.subtotal.toLocaleString()} ৳</td>
           </tr>
-          <tr>
+           <tr>
             <td style="padding:5px 0;color:rgba(255,255,255,0.6);font-size:13px;">ডেলিভারি চার্জ</td>
             <td style="padding:5px 0;text-align:right;color:rgba(255,255,255,0.6);font-size:13px;">${order.deliveryCharge.toLocaleString()} ৳</td>
           </tr>
+          ${
+            order.discount > 0
+              ? `
+          <tr>
+            <td style="padding:5px 0;color:#86efac;font-size:13px;">🎟️ কুপন ছাড় ${order.coupon?.code ? `(${order.coupon.code})` : ""}</td>
+            <td style="padding:5px 0;text-align:right;color:#86efac;font-size:13px;font-weight:700;">-${order.discount.toLocaleString()} ৳</td>
+          </tr>`
+              : ""
+          }
           <tr>
             <td colspan="2"><div style="height:1px;background:rgba(255,255,255,0.15);margin:10px 0;"></div></td>
           </tr>
@@ -604,10 +613,19 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
             <td style="padding:5px 0;font-size:13px;color:#64748B;">পণ্যের মূল্য</td>
             <td style="padding:5px 0;text-align:right;font-size:13px;color:#374151;font-weight:600;">${order.subtotal.toLocaleString()} ৳</td>
           </tr>
-          <tr>
+                    <tr>
             <td style="padding:5px 0;font-size:13px;color:#64748B;">ডেলিভারি চার্জ</td>
             <td style="padding:5px 0;text-align:right;font-size:13px;color:#374151;font-weight:600;">${order.deliveryCharge.toLocaleString()} ৳</td>
           </tr>
+          ${
+            order.discount > 0
+              ? `
+          <tr>
+            <td style="padding:5px 0;font-size:13px;color:#16a34a;">🎟️ কুপন ছাড় ${order.coupon?.code ? `<span style="background:#DCFCE7;color:#16a34a;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;">${order.coupon.code}</span>` : ""}</td>
+            <td style="padding:5px 0;text-align:right;font-size:13px;color:#16a34a;font-weight:700;">-${order.discount.toLocaleString()} ৳</td>
+          </tr>`
+              : ""
+          }
           <tr>
             <td colspan="2" style="padding:4px 0;"><div style="height:1px;background:#E2E8F0;margin:6px 0;"></div></td>
           </tr>
