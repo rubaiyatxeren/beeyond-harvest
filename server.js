@@ -10,6 +10,36 @@ const PORT = process.env.PORT || 5000;
 let server;
 
 // ==============================
+// ⏱️ GLOBAL TIMEOUT PROTECTION
+// ==============================
+const TIME_OUT_MS = 25000; // 25 seconds
+
+// Add timeout middleware to app
+app.use((req, res, next) => {
+  req.setTimeout(TIME_OUT_MS, () => {
+    console.error(`⏰ Request timeout: ${req.method} ${req.url}`);
+    if (!res.headersSent) {
+      res.status(504).json({
+        success: false,
+        message: "Request timeout. Please try again.",
+      });
+    }
+  });
+
+  res.setTimeout(TIME_OUT_MS, () => {
+    console.error(`⏰ Response timeout: ${req.method} ${req.url}`);
+    if (!res.headersSent) {
+      res.status(504).json({
+        success: false,
+        message: "Server timeout. Please try again.",
+      });
+    }
+  });
+
+  next();
+});
+
+// ==============================
 // ✅ CREATE DEFAULT ADMIN
 // ==============================
 const createDefaultAdmin = async () => {
@@ -39,10 +69,20 @@ const createDefaultAdmin = async () => {
 };
 
 // ==============================
-// ✅ GRACEFUL SHUTDOWN
+// ✅ GRACEFUL SHUTDOWN (IMPROVED)
 // ==============================
 const shutdown = async (signal) => {
   console.log(`⚠️ Shutdown initiated: ${signal}`);
+
+  // Prevent multiple shutdown attempts
+  if (shutdown.shuttingDown) return;
+  shutdown.shuttingDown = true;
+
+  // Force exit after 10 seconds
+  const forceExit = setTimeout(() => {
+    console.error("⚠️ Force exit after timeout");
+    process.exit(1);
+  }, 10000);
 
   try {
     if (server) {
@@ -55,12 +95,34 @@ const shutdown = async (signal) => {
       console.log("✅ MongoDB connection closed");
     }
 
+    clearTimeout(forceExit);
     process.exit(signal === "SIGINT" || signal === "SIGTERM" ? 0 : 1);
   } catch (err) {
     console.error("❌ Shutdown error:", err.message);
+    clearTimeout(forceExit);
     process.exit(1);
   }
 };
+
+// ==============================
+// ✅ MEMORY USAGE MONITORING
+// ==============================
+setInterval(() => {
+  const used = process.memoryUsage();
+  const rssMB = (used.rss / 1024 / 1024).toFixed(2);
+  const heapUsedMB = (used.heapUsed / 1024 / 1024).toFixed(2);
+  const heapTotalMB = (used.heapTotal / 1024 / 1024).toFixed(2);
+
+  if (rssMB > 400) {
+    console.warn(
+      `⚠️ High memory usage: RSS=${rssMB} MB, Heap=${heapUsedMB}/${heapTotalMB} MB`,
+    );
+  } else if (process.env.NODE_ENV === "development") {
+    console.log(
+      `📊 Memory: RSS=${rssMB} MB, Heap=${heapUsedMB}/${heapTotalMB} MB`,
+    );
+  }
+}, 30000);
 
 // ==============================
 // ✅ START SERVER
@@ -83,6 +145,7 @@ const startServer = async () => {
       console.log(`🚀 Server running (${process.env.NODE_ENV || "dev"})`);
       console.log(`🌐 Port: ${PORT}`);
       console.log(`❤️ Health: /health`);
+      console.log(`⏱️ Request timeout: ${TIME_OUT_MS}ms`);
     });
 
     // 🔥 Catch server-level errors
@@ -92,7 +155,7 @@ const startServer = async () => {
     });
   } catch (err) {
     console.error("❌ Startup failed:", err.message);
-    process.exit(1); // Let Render restart cleanly
+    process.exit(1);
   }
 };
 
@@ -107,7 +170,8 @@ process.on("unhandledRejection", (err) => {
 
   if (
     err?.name === "MongoNetworkError" ||
-    err?.name === "MongooseServerSelectionError"
+    err?.name === "MongooseServerSelectionError" ||
+    err?.code === "ECONNRESET"
   ) {
     console.error("❌ Critical DB error → restarting...");
     shutdown("UNHANDLED_REJECTION");
@@ -156,5 +220,22 @@ mongoose.connection.on("error", (err) => {
 
 mongoose.connection.on("disconnected", () => {
   console.warn("🟡 MongoDB disconnected — retrying...");
-  // DO NOT exit — allow reconnect
 });
+
+mongoose.connection.on("reconnected", () => {
+  console.log("🟢 MongoDB reconnected");
+});
+
+// ==============================
+// 🔥 PROCESS EVENTS
+// ==============================
+
+process.on("beforeExit", (code) => {
+  console.log(`📋 Process beforeExit with code: ${code}`);
+});
+
+process.on("exit", (code) => {
+  console.log(`📋 Process exit with code: ${code}`);
+});
+
+console.log("✅ Server initialization complete");
