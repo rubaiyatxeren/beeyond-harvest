@@ -1,20 +1,17 @@
 const dotenv = require("dotenv");
 dotenv.config();
 
-// ✅ NEVER shutdown on network/DB errors — mongoose auto-reconnects
 process.on("uncaughtException", (err) => {
   console.error("❌ Uncaught Exception:", err.message);
   if (err.code === "ERR_USE_AFTER_FREE" || err.code === "ENOMEM") {
     console.error("❌ Fatal OOM — shutting down");
     process.exit(1);
   }
-  // everything else: log and survive
 });
 
 process.on("unhandledRejection", (reason) => {
   const msg = reason instanceof Error ? reason.message : String(reason);
   console.error("❌ Unhandled Rejection:", msg);
-  // ✅ NEVER call shutdown here — ECONNRESET, MongoNetworkError etc are recoverable
 });
 
 const app = require("./src/app");
@@ -27,8 +24,20 @@ const TIME_OUT_MS = 25000;
 
 let server;
 let memoryMonitor;
+let isReady = false;
 
-// ─── Graceful shutdown (SIGTERM/SIGINT only) ──────────────────────────────────
+// ─── Warm-up guard — reject non-health requests until DB is ready ─────────────
+app.use((req, res, next) => {
+  if (!isReady && req.path !== "/health") {
+    return res.status(503).json({
+      success: false,
+      message: "Server is warming up, please retry in a few seconds.",
+    });
+  }
+  next();
+});
+
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
 const shutdown = async (signal) => {
   if (shutdown._busy) return;
   shutdown._busy = true;
@@ -93,25 +102,34 @@ const startMemoryMonitor = () => {
 // ─── Keep-alive self-ping ─────────────────────────────────────────────────────
 const startKeepAlive = () => {
   const url = process.env.RENDER_EXTERNAL_URL;
-  if (!url) return;
-  setInterval(
+  if (!url) {
+    console.warn("⚠️ RENDER_EXTERNAL_URL not set — keep-alive disabled");
+    return;
+  }
+  const interval = setInterval(
     () => {
-      fetch(`${url}/health`).catch(() => {});
+      fetch(`${url}/health`)
+        .then(() => console.log("💓 Keep-alive ping OK"))
+        .catch((e) => console.warn("⚠️ Keep-alive ping failed:", e.message));
     },
-    8 * 60 * 1000,
-  ); // every 8 min (UptimeRobot covers 5 min, this is backup)
+    4 * 60 * 1000,
+  ); // every 4 min
+  interval.unref();
+  console.log("💓 Keep-alive started →", url);
 };
 
-// ─── Mongoose event logs (single source) ─────────────────────────────────────
+// ─── Mongoose event logs ──────────────────────────────────────────────────────
 mongoose.connection.on("error", (e) =>
   console.error("🔴 MongoDB error:", e.message),
 );
-mongoose.connection.on("disconnected", () =>
-  console.warn("🟡 MongoDB disconnected — retrying..."),
-);
-mongoose.connection.on("reconnected", () =>
-  console.log("🟢 MongoDB reconnected"),
-);
+mongoose.connection.on("disconnected", () => {
+  console.warn("🟡 MongoDB disconnected — retrying...");
+  isReady = false;
+});
+mongoose.connection.on("reconnected", () => {
+  console.log("🟢 MongoDB reconnected");
+  isReady = true;
+});
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 const startServer = async () => {
@@ -122,17 +140,19 @@ const startServer = async () => {
 
     await createDefaultAdmin();
 
+    isReady = true;
+    console.log("✅ Server ready — accepting requests");
+
     server = app.listen(PORT, "0.0.0.0", () => {
       console.log(
         `🚀 Server running on port ${PORT} (${process.env.NODE_ENV || "dev"})`,
       );
       console.log(`❤️  Health: /health`);
-      if (process.env.NODE_ENV === "production") startKeepAlive();
+      startKeepAlive(); // always run — guards itself with URL check
     });
 
     server.on("error", (err) => {
       console.error("❌ HTTP server error:", err.message);
-      // don't shutdown — let Render handle it
     });
 
     startMemoryMonitor();
