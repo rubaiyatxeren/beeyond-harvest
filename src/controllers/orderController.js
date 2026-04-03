@@ -1208,6 +1208,343 @@ const getOrdersByPhone = async (req, res) => {
   }
 };
 
+// Add these new controller functions to your orderController.js
+
+// @desc    Get all unique customer emails
+// @route   GET /api/orders/customers/emails
+// @access  Private (Admin only)
+const getAllCustomerEmails = async (req, res) => {
+  try {
+    console.log("📧 [EMAIL LIST] Fetching all customer emails");
+
+    // Get unique customer emails from orders
+    const customers = await Order.aggregate([
+      {
+        $group: {
+          _id: "$customer.email",
+          name: { $first: "$customer.name" },
+          phone: { $first: "$customer.phone" },
+          totalOrders: { $sum: 1 },
+          totalSpent: { $sum: "$total" },
+          lastOrderDate: { $max: "$createdAt" },
+        },
+      },
+      {
+        $match: {
+          _id: { $ne: null, $exists: true, $ne: "" },
+        },
+      },
+      {
+        $sort: { lastOrderDate: -1 },
+      },
+    ]);
+
+    // Filter out invalid emails
+    const validCustomers = customers.filter(
+      (c) => c._id && c._id.includes("@") && !c._id.includes("@loadtest.com"),
+    );
+
+    console.log(
+      `✅ [EMAIL LIST] Found ${validCustomers.length} unique customer emails`,
+    );
+
+    res.json({
+      success: true,
+      count: validCustomers.length,
+      data: validCustomers,
+    });
+  } catch (error) {
+    console.error("❌ [EMAIL LIST] Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Send bulk promotional email to all customers
+// @route   POST /api/orders/customers/bulk-email
+// @access  Private (Admin only)
+const sendBulkPromotionalEmail = async (req, res) => {
+  try {
+    const {
+      subject,
+      message,
+      offerDetails,
+      couponCode,
+      sendToAll = true,
+      testEmail,
+    } = req.body;
+
+    if (!subject || !message) {
+      return res.status(400).json({
+        success: false,
+        message: "Subject and message are required",
+      });
+    }
+
+    console.log(`📧 [BULK EMAIL] Starting bulk email campaign: "${subject}"`);
+
+    // Get all customer emails
+    const customers = await Order.aggregate([
+      {
+        $group: {
+          _id: "$customer.email",
+          name: { $first: "$customer.name" },
+          totalOrders: { $sum: 1 },
+          totalSpent: { $sum: "$total" },
+        },
+      },
+      {
+        $match: {
+          _id: { $ne: null, $exists: true, $ne: "" },
+        },
+      },
+    ]);
+
+    const validCustomers = customers.filter(
+      (c) => c._id && c._id.includes("@") && !c._id.includes("@loadtest.com"),
+    );
+
+    let targetEmails = [];
+
+    if (sendToAll) {
+      targetEmails = validCustomers.map((c) => ({
+        email: c._id,
+        name: c.name,
+      }));
+    } else if (testEmail) {
+      targetEmails = [{ email: testEmail, name: "Test Customer" }];
+    }
+
+    if (targetEmails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid customer emails found",
+      });
+    }
+
+    console.log(`📧 [BULK EMAIL] Sending to ${targetEmails.length} recipients`);
+
+    // Generate promotional email HTML
+    const promotionalHtml = generatePromotionalEmailTemplate(
+      subject,
+      message,
+      offerDetails,
+      couponCode,
+    );
+
+    // Send emails in batches to avoid overwhelming the email service
+    const BATCH_SIZE = 10;
+    const results = {
+      total: targetEmails.length,
+      sent: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    for (let i = 0; i < targetEmails.length; i += BATCH_SIZE) {
+      const batch = targetEmails.slice(i, i + BATCH_SIZE);
+
+      const batchPromises = batch.map(async (customer) => {
+        try {
+          // Personalize the email with customer name
+          let personalizedMessage = message;
+          if (customer.name && customer.name !== "undefined") {
+            personalizedMessage = message.replace(/{name}/g, customer.name);
+          }
+
+          const personalizedHtml = promotionalHtml.replace(
+            /{name}/g,
+            customer.name || "Valued Customer",
+          );
+
+          const result = await sendEmail(
+            customer.email,
+            subject,
+            personalizedHtml,
+          );
+
+          if (result && result.success) {
+            results.sent++;
+            console.log(`✅ [BULK EMAIL] Sent to ${customer.email}`);
+          } else {
+            results.failed++;
+            results.errors.push(
+              `${customer.email}: ${result?.error || "Unknown error"}`,
+            );
+          }
+        } catch (err) {
+          results.failed++;
+          results.errors.push(`${customer.email}: ${err.message}`);
+          console.error(
+            `❌ [BULK EMAIL] Failed for ${customer.email}:`,
+            err.message,
+          );
+        }
+      });
+
+      await Promise.allSettled(batchPromises);
+
+      // Small delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < targetEmails.length) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    console.log(
+      `✅ [BULK EMAIL] Campaign complete: ${results.sent} sent, ${results.failed} failed`,
+    );
+
+    res.json({
+      success: true,
+      message: `Bulk email campaign completed: ${results.sent} sent successfully, ${results.failed} failed`,
+      results,
+    });
+  } catch (error) {
+    console.error("❌ [BULK EMAIL] Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Generate promotional email template
+const generatePromotionalEmailTemplate = (
+  subject,
+  message,
+  offerDetails,
+  couponCode,
+) => {
+  const hasOffer = offerDetails && offerDetails.trim();
+  const hasCoupon = couponCode && couponCode.trim();
+
+  return `<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${subject}</title>
+</head>
+<body style="margin:0;padding:0;background:#F5F0E8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;padding:24px 16px;">
+<tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;">
+
+  <!-- Header -->
+  <tr><td>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E 0%,#1A2E5A 60%,#0D1B3E 100%);border-radius:24px 24px 0 0;overflow:hidden;">
+      <tr><td style="padding:40px 40px 20px;text-align:center;">
+        <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#F5A623,#C47F11);border-radius:14px;width:52px;height:52px;text-align:center;vertical-align:middle;font-size:26px;line-height:52px;">🐝</td>
+            <td style="padding-left:12px;text-align:left;vertical-align:middle;">
+              <div style="font-size:22px;font-weight:800;color:white;letter-spacing:0.5px;">BeeHarvest</div>
+              <div style="font-size:11px;color:#FDD882;margin-top:2px;">বাংলাদেশের বিশ্বস্ত অনলাইন শপ</div>
+            </td>
+          </tr>
+        </table>
+        <h1 style="margin:0 0 10px;color:white;font-size:28px;font-weight:800;line-height:1.25;">✨ Special Offer Just for You!</h1>
+        <p style="margin:0 0 32px;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.6;">Hello <strong style="color:#FDD882;">{name}</strong>, we have something exciting for you!</p>
+      </td></tr>
+      <tr><td style="line-height:0;font-size:0;">
+        <svg width="100%" height="40" viewBox="0 0 600 40" preserveAspectRatio="none">
+          <path d="M0,0 C150,40 450,0 600,40 L600,40 L0,40 Z" fill="#FFF9F0"/>
+        </svg>
+      </td></tr>
+    </table>
+  </td></tr>
+
+  <!-- Body -->
+  <tr><td style="background:#FFF9F0;padding:0 32px;">
+    
+    <div style="padding:28px 0 0;">
+      <p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.7;">
+        ${message}
+      </p>
+    </div>
+
+    ${
+      hasOffer
+        ? `
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:16px;margin-bottom:20px;">
+      <tr><td style="padding:24px 28px;text-align:center;">
+        <div style="font-size:14px;color:rgba(255,255,255,0.7);margin-bottom:8px;">🎉 Special Offer</div>
+        <div style="font-size:24px;font-weight:800;color:#FDD882;margin-bottom:8px;">${offerDetails}</div>
+        ${
+          hasCoupon
+            ? `
+          <div style="background:rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-top:12px;">
+            <div style="font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:1px;">USE COUPON CODE</div>
+            <div style="font-family:'Courier New',monospace;font-size:24px;font-weight:800;color:#FDD882;letter-spacing:2px;">${couponCode}</div>
+          </div>
+        `
+            : ""
+        }
+      </td></tr>
+    </table>
+    `
+        : ""
+    }
+
+    <!-- CTA Button -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+      <tr><td align="center">
+        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/shop"
+          style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:800;letter-spacing:0.3px;">
+          🛍️ Shop Now & Save
+        </a>
+      </td></tr>
+    </table>
+
+    <!-- Trust badges -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;border:1px solid #F0E8D8;border-radius:14px;overflow:hidden;">
+      <tr>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🚚</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Free Delivery</div>
+          <div style="font-size:10px;color:#6B7A99;">On orders over ৳1000</div>
+        </td>
+        <td width="1" style="background:#F0E8D8;padding:0;"></td>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🛡️</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Secure Payment</div>
+          <div style="font-size:10px;color:#6B7A99;">100% Protected</div>
+        </td>
+        <td width="1" style="background:#F0E8D8;padding:0;"></td>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">↩️</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Easy Returns</div>
+          <div style="font-size:10px;color:#6B7A99;">7 days hassle-free</div>
+        </td>
+      </tr>
+    </table>
+
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0D1B3E;border-radius:0 0 24px 24px;">
+      <tr><td style="padding:30px 32px;text-align:center;">
+        <div style="margin-bottom:16px;">
+          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Facebook</a>
+          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">WhatsApp</a>
+          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Instagram</a>
+        </div>
+        <p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;">🌾 BeeHarvest — সরাসরি ফার্ম থেকে আপনার দরজায়</p>
+        <p style="margin:0 0 10px;font-size:12px;color:rgba(255,255,255,0.35);">সাহায্যের জন্য: <a href="mailto:support@beeharvest.com.bd" style="color:#FDD882;text-decoration:none;">support@beeharvest.com.bd</a></p>
+        <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);">© ${new Date().getFullYear()} BeeHarvest. সর্বস্বত্ব সংরক্ষিত।</p>
+        <p style="margin-top:12px;font-size:10px;color:rgba(255,255,255,0.15);">You're receiving this email because you've shopped with BeeHarvest.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+
+  <tr><td style="height:24px;"></td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+};
+
+// Add to module.exports
 module.exports = {
   createOrder,
   getOrders,
@@ -1218,4 +1555,6 @@ module.exports = {
   getOrderStats,
   getSalesAnalytics,
   sendManualOrderEmail,
+  getAllCustomerEmails, 
+  sendBulkPromotionalEmail, 
 };
