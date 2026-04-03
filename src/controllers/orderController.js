@@ -151,6 +151,7 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
 // @desc    Create order (OPTIMIZED - non-blocking)
 // @route   POST /api/orders
 // @access  Public
+// @desc    Create order - ULTRA FAST, NO BACKGROUND PROCESSING
 const createOrder = async (req, res) => {
   const startTime = Date.now();
 
@@ -160,7 +161,7 @@ const createOrder = async (req, res) => {
 
     const { items, customer, paymentMethod, deliveryCharge } = req.body;
 
-    // ✅ QUICK VALIDATION (fail fast)
+    // Validation
     if (!items?.length) {
       return res
         .status(400)
@@ -174,38 +175,30 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Fetch products in ONE query
+    // Fetch products
     const productIds = items.map((i) => i.product);
-    const products = await Product.find({
-      _id: { $in: productIds },
-    }).lean();
-
+    const products = await Product.find({ _id: { $in: productIds } }).lean();
     const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
     let subtotal = 0;
     const orderItems = [];
 
-    // Validate stock and calculate
     for (const item of items) {
       const product = productMap.get(item.product);
-
       if (!product) {
         return res.status(404).json({
           success: false,
           message: `Product not found: ${item.product}`,
         });
       }
-
       if (product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for "${product.name}"`,
         });
       }
-
       const total = product.price * item.quantity;
       subtotal += total;
-
       orderItems.push({
         product: product._id,
         name: product.name,
@@ -218,13 +211,11 @@ const createOrder = async (req, res) => {
 
     const finalDeliveryCharge = deliveryCharge || 60;
     const total = subtotal + finalDeliveryCharge;
-
-    // Generate order number
     const now = new Date();
     const fiveDigit = Math.floor(10000 + Math.random() * 90000);
     const orderNumber = `ORD-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${fiveDigit}`;
 
-    // CREATE ORDER
+    // Create order
     const order = await Order.create({
       orderNumber,
       customer: {
@@ -246,24 +237,14 @@ const createOrder = async (req, res) => {
       `✅ Order created: ${order.orderNumber} in ${Date.now() - startTime}ms`,
     );
 
-    // UPDATE STOCK (atomic)
+    // Update stock
     const bulkOps = items.map((item) => ({
       updateOne: {
         filter: { _id: item.product, stock: { $gte: item.quantity } },
         update: { $inc: { stock: -item.quantity } },
       },
     }));
-
-    const stockResult = await Product.bulkWrite(bulkOps);
-
-    if (stockResult.modifiedCount !== items.length) {
-      await Order.findByIdAndDelete(order._id);
-      console.warn("⚠️ Stock mismatch — order rolled back");
-      return res.status(400).json({
-        success: false,
-        message: "Some items went out of stock. Please try again.",
-      });
-    }
+    await Product.bulkWrite(bulkOps);
 
     // ✅ SEND RESPONSE IMMEDIATELY
     res.status(201).json({
@@ -272,67 +253,39 @@ const createOrder = async (req, res) => {
       message: "Order created successfully",
     });
 
-    // 🔥 FIRE AND FORGET EMAILS - COMPLETELY NON-BLOCKING
-    // This runs in background and will NEVER affect the response
-    (async () => {
-      try {
-        console.log(`📧 Background emails for ${order.orderNumber}`);
+    // 🔥 FIRE AND FORGET - ONE SIMPLE CALL, NO setImmediate, NO LOOPS
+    // Just call and forget - the email service handles everything internally
+    if (process.env.DISABLE_EMAIL !== "true") {
+      // Customer email - one call
+      sendEmail(
+        order.customer.email,
+        `🎉 Order Confirmed - ${order.orderNumber}`,
+        generateOrderEmailTemplate(order, "new_order"),
+      );
 
-        // Customer email - wrapped in try/catch, NEVER throws
-        try {
-          const customerEmailResult = await sendEmail(
-            order.customer.email,
-            `🎉 Order Confirmed - ${order.orderNumber}`,
-            generateOrderEmailTemplate(order, "new_order"),
-          );
-          if (customerEmailResult?.success) {
-            console.log(`✅ Customer email sent to ${order.customer.email}`);
-          } else {
-            console.log(
-              `⚠️ Customer email skipped: ${customerEmailResult?.error || "unknown"}`,
-            );
-          }
-        } catch (err) {
-          // Silent fail - email error doesn't affect order
-          console.log(`📧 Customer email error (ignored): ${err.message}`);
-        }
+      // Admin emails - simple loop
+      const adminEmails = (
+        process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
+      ).split(",");
+      const adminHtml = generateAdminEmailTemplate(order, "new_order");
 
-        // Admin emails - fire in parallel
-        const adminEmails = (
-          process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
-        ).split(",");
-        const adminHtml = generateAdminEmailTemplate(order, "new_order");
+      adminEmails.forEach((email) => {
+        sendEmail(
+          email.trim(),
+          `🆕 New Order #${order.orderNumber}`,
+          adminHtml,
+        );
+      });
 
-        for (const email of adminEmails) {
-          try {
-            const adminEmailResult = await sendEmail(
-              email.trim(),
-              `🆕 New Order #${order.orderNumber}`,
-              adminHtml,
-            );
-            if (adminEmailResult?.success) {
-              console.log(`✅ Admin email sent to ${email}`);
-            }
-          } catch (err) {
-            // Silent fail
-            console.log(
-              `📧 Admin email error (ignored) for ${email}: ${err.message}`,
-            );
-          }
-        }
-
-        console.log(`✅ Email background complete for ${order.orderNumber}`);
-      } catch (err) {
-        // Catch any unexpected error - just log, don't crash
-        console.log(`📧 Email background error (ignored): ${err.message}`);
-      }
-    })();
+      console.log(`📧 Emails triggered for ${order.orderNumber}`);
+    } else {
+      console.log(`📧 Emails disabled for ${order.orderNumber}`);
+    }
   } catch (error) {
     console.error("❌ Create order error:", error.message);
-    // NEVER expose internal errors to client
     res.status(500).json({
       success: false,
-      message: "Failed to create order. Please try again.",
+      message: "Failed to create order",
     });
   }
 };
