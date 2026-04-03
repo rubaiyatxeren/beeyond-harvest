@@ -348,7 +348,7 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
       <tr>
         <td align="center">
-          <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}"
+          <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}?track=${order.orderNumber}"
             style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:800;letter-spacing:0.3px;">
             🔍 অর্ডার ট্র্যাক করুন
           </a>
