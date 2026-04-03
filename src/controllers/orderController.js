@@ -496,12 +496,16 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
     <table width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td style="font-size:13px;color:${isNew ? "#065F46" : "#1E40AF"};font-weight:600;">
-          ${
-            isNew
-              ? `⚡ জরুরি: নতুন অর্ডার প্রক্রিয়া করুন — ${new Date(order.createdAt).toLocaleString("bn-BD")}`
-              : `🔄 অর্ডার স্ট্যাটাস পরিবর্তিত হয়েছে`
-          }
-        </td>
+  ${
+    isNew
+      ? `⚡ জরুরি: নতুন অর্ডার প্রক্রিয়া করুন — ${new Date(
+          order.createdAt,
+        ).toLocaleString("bn-BD", {
+          timeZone: "Asia/Dhaka",
+        })}`
+      : `🔄 অর্ডার স্ট্যাটাস পরিবর্তিত হয়েছে`
+  }
+</td>
         <td align="right">
           <span style="background:${osc.bg};color:${osc.color};padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;">${order.orderStatus.toUpperCase()}</span>
         </td>
