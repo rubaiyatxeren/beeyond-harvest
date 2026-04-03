@@ -131,7 +131,7 @@ console.log("✅ Routes registered:");
   "/api/delivery-charges",
 ].forEach((route) => console.log("  -", route));
 
-// ✅ HEALTH CHECK (Render ping)
+// ✅ HEALTH CHECK — returns 503 if DB is down so monitors know server isn't ready
 app.get("/health", (req, res) => {
   const dbState = mongoose.connection.readyState;
 
@@ -142,9 +142,11 @@ app.get("/health", (req, res) => {
     3: "disconnecting",
   };
 
-  res.json({
-    status: "OK",
-    message: "Server is running",
+  const isConnected = dbState === 1;
+
+  res.status(isConnected ? 200 : 503).json({
+    status: isConnected ? "OK" : "DEGRADED",
+    message: isConnected ? "Server is running" : "Database not connected",
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || "development",
