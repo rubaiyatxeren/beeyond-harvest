@@ -1,5 +1,4 @@
 const nodemailer = require("nodemailer");
-const dns = require("dns").promises;
 
 let transporter = null;
 let initPromise = null;
@@ -7,21 +6,12 @@ let failureCount = 0;
 let lastFailureTime = 0;
 
 const CONFIG = {
-  maxRetries: 2,
-  retryDelay: 2000,
+  maxRetries: 1, // reduced — timeouts are slow, don't double the wait
+  retryDelay: 3000,
   cooldownMs: 120000,
-  timeout: 15000,
-  verifyTimeout: 20000,
+  timeout: 20000,
+  verifyTimeout: 15000,
   maxFailuresBeforeCooldown: 3,
-};
-
-const resolveIPv4 = async (host) => {
-  try {
-    const ips = await dns.resolve4(host);
-    return ips?.[0] || host;
-  } catch {
-    return host;
-  }
 };
 
 const isInCooldown = () => {
@@ -36,21 +26,23 @@ const isInCooldown = () => {
 
 const getTransporter = () => {
   if (transporter) return Promise.resolve(transporter);
+
   if (!initPromise) {
     initPromise = (async () => {
       try {
         const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
+
         if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
-          console.warn("⚠️ Email config missing");
+          console.warn(
+            "⚠️ Email config missing — check EMAIL_HOST, EMAIL_USER, EMAIL_PASS",
+          );
           return null;
         }
 
-        const host = await resolveIPv4(EMAIL_HOST);
-
         const t = nodemailer.createTransport({
-          host,
-          port: parseInt(EMAIL_PORT || "587", 10), // 587 STARTTLS — reliable on Render
-          secure: false,
+          host: EMAIL_HOST, // smtp-relay.brevo.com
+          port: parseInt(EMAIL_PORT || "587", 10), // 587
+          secure: false, // STARTTLS on 587
           auth: { user: EMAIL_USER, pass: EMAIL_PASS },
           tls: { rejectUnauthorized: false },
           connectionTimeout: CONFIG.timeout,
@@ -58,7 +50,6 @@ const getTransporter = () => {
           greetingTimeout: CONFIG.timeout,
         });
 
-        // ✅ verify is best-effort — we assign transporter regardless
         try {
           await Promise.race([
             t.verify(),
@@ -74,18 +65,18 @@ const getTransporter = () => {
           console.warn("⚠️ SMTP verify warn (still usable):", e.message);
         }
 
-        // ✅ CRITICAL: assign AFTER verify attempt, not inside try-catch above
         transporter = t;
-        console.log("✅ Transporter ready");
+        console.log("✅ Transporter ready →", EMAIL_HOST);
         return transporter;
       } catch (err) {
         console.error("❌ Transporter init failed:", err.message);
         return null;
       } finally {
-        initPromise = null; // allow retry on next call
+        initPromise = null;
       }
     })();
   }
+
   return initPromise;
 };
 
@@ -102,37 +93,46 @@ const sendEmail = async (to, subject, html, retry = 0) => {
 
     console.log(`📧 Sending to ${to} (attempt ${retry + 1})`);
 
+    const fromEmail = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+
     const info = await Promise.race([
       t.sendMail({
-        from: `"Beeyond Harvest" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
+        from: `"Beeyond Harvest" <${fromEmail}>`,
         to,
         subject,
         html,
+        text: html
+          .replace(/<[^>]*>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim(),
       }),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Send timeout")), CONFIG.timeout),
       ),
     ]);
 
-    console.log("✅ Email sent:", info.messageId);
+    console.log(`✅ Email sent → ${to} [${info.messageId}]`);
     failureCount = 0;
-    return { success: true };
+    return { success: true, messageId: info.messageId };
   } catch (err) {
-    console.error("❌ Email error:", err.message);
+    console.error(`❌ Email error (${to}):`, err.message);
     failureCount++;
     lastFailureTime = Date.now();
 
-    // reset transporter on connection-level errors
     if (
       ["ECONNECTION", "ETIMEDOUT", "EAUTH", "ESOCKET", "ECONNRESET"].includes(
         err.code,
       )
     ) {
       transporter = null;
+      initPromise = null;
+      console.log("🔄 Transporter reset due to:", err.code);
     }
 
     if (retry < CONFIG.maxRetries) {
-      await new Promise((r) => setTimeout(r, CONFIG.retryDelay * (retry + 1)));
+      const delay = CONFIG.retryDelay * (retry + 1);
+      console.log(`⏳ Retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
       return sendEmail(to, subject, html, retry + 1);
     }
 
