@@ -1,17 +1,14 @@
-const nodemailer = require("nodemailer");
+// utils/emailService.js — Brevo HTTP API (no SMTP, no port blocks)
 
-let transporter = null;
-let initPromise = null;
 let failureCount = 0;
 let lastFailureTime = 0;
 
 const CONFIG = {
-  maxRetries: 1, // reduced — timeouts are slow, don't double the wait
-  retryDelay: 3000,
+  maxRetries: 2,
+  retryDelay: 2000,
   cooldownMs: 120000,
-  timeout: 20000,
-  verifyTimeout: 15000,
   maxFailuresBeforeCooldown: 3,
+  timeout: 15000,
 };
 
 const isInCooldown = () => {
@@ -24,62 +21,6 @@ const isInCooldown = () => {
   return false;
 };
 
-const getTransporter = () => {
-  if (transporter) return Promise.resolve(transporter);
-
-  if (!initPromise) {
-    initPromise = (async () => {
-      try {
-        const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
-
-        if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
-          console.warn(
-            "⚠️ Email config missing — check EMAIL_HOST, EMAIL_USER, EMAIL_PASS",
-          );
-          return null;
-        }
-
-        const t = nodemailer.createTransport({
-          host: EMAIL_HOST, // smtp-relay.brevo.com
-          port: parseInt(EMAIL_PORT || "587", 10), // 587
-          secure: false, // STARTTLS on 587
-          auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-          tls: { rejectUnauthorized: false },
-          connectionTimeout: CONFIG.timeout,
-          socketTimeout: CONFIG.timeout,
-          greetingTimeout: CONFIG.timeout,
-        });
-
-        try {
-          await Promise.race([
-            t.verify(),
-            new Promise((_, r) =>
-              setTimeout(
-                () => r(new Error("verify timeout")),
-                CONFIG.verifyTimeout,
-              ),
-            ),
-          ]);
-          console.log("✅ SMTP verified");
-        } catch (e) {
-          console.warn("⚠️ SMTP verify warn (still usable):", e.message);
-        }
-
-        transporter = t;
-        console.log("✅ Transporter ready →", EMAIL_HOST);
-        return transporter;
-      } catch (err) {
-        console.error("❌ Transporter init failed:", err.message);
-        return null;
-      } finally {
-        initPromise = null;
-      }
-    })();
-  }
-
-  return initPromise;
-};
-
 const sendEmail = async (to, subject, html, retry = 0) => {
   if (process.env.DISABLE_EMAIL === "true")
     return { success: true, disabled: true };
@@ -87,47 +28,57 @@ const sendEmail = async (to, subject, html, retry = 0) => {
   if (!to || !subject || !html)
     return { success: false, error: "Invalid email data" };
 
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    console.error("❌ BREVO_API_KEY not set");
+    return { success: false, error: "BREVO_API_KEY missing" };
+  }
+
   try {
-    const t = await getTransporter();
-    if (!t) return { success: false, error: "Transporter unavailable" };
+    console.log(`📧 Sending to ${to} via Brevo API (attempt ${retry + 1})`);
 
-    console.log(`📧 Sending to ${to} (attempt ${retry + 1})`);
+    const fromEmail = process.env.EMAIL_FROM || "noreply@beeyondharvestbd.com";
+    const fromName = "Beeyond Harvest";
 
-    const fromEmail = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CONFIG.timeout);
 
-    const info = await Promise.race([
-      t.sendMail({
-        from: `"Beeyond Harvest" <${fromEmail}>`,
-        to,
+    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        sender: { name: fromName, email: fromEmail },
+        to: [{ email: to }],
         subject,
-        html,
-        text: html
+        htmlContent: html,
+        textContent: html
           .replace(/<[^>]*>/g, " ")
           .replace(/\s+/g, " ")
           .trim(),
       }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Send timeout")), CONFIG.timeout),
-      ),
-    ]);
+    });
 
-    console.log(`✅ Email sent → ${to} [${info.messageId}]`);
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`✅ Email sent → ${to} [${data.messageId || "ok"}]`);
     failureCount = 0;
-    return { success: true, messageId: info.messageId };
+    return { success: true, messageId: data.messageId };
   } catch (err) {
-    console.error(`❌ Email error (${to}):`, err.message);
+    const msg = err.name === "AbortError" ? "Request timeout" : err.message;
+    console.error(`❌ Email error (${to}): ${msg}`);
     failureCount++;
     lastFailureTime = Date.now();
-
-    if (
-      ["ECONNECTION", "ETIMEDOUT", "EAUTH", "ESOCKET", "ECONNRESET"].includes(
-        err.code,
-      )
-    ) {
-      transporter = null;
-      initPromise = null;
-      console.log("🔄 Transporter reset due to:", err.code);
-    }
 
     if (retry < CONFIG.maxRetries) {
       const delay = CONFIG.retryDelay * (retry + 1);
@@ -136,7 +87,7 @@ const sendEmail = async (to, subject, html, retry = 0) => {
       return sendEmail(to, subject, html, retry + 1);
     }
 
-    return { success: false, error: err.message };
+    return { success: false, error: msg };
   }
 };
 
