@@ -1,204 +1,103 @@
-// utils/emailService.js - CRASH-PROOF with emails enabled
-// NEVER throws errors, NEVER crashes server
+// utils/emailService.js - ULTRA LIGHT, NO QUEUE, NO BLOCKING
+// This version uses setImmediate and NEVER keeps the event loop busy
 
 const nodemailer = require("nodemailer");
-const dns = require("dns").promises;
 
 let transporter = null;
-let emailQueue = [];
-let isProcessing = false;
-let failureCount = 0;
+let consecutiveFailures = 0;
 let lastFailureTime = 0;
 
-const CONFIG = {
-  timeout: 5000, // 5 second timeout
-  cooldownMs: 60000, // 60 second cooldown on failures
-  maxFailuresBeforeCooldown: 5,
-  batchDelayMs: 1000,
-};
-
-// Mock transporter that ALWAYS works (fallback)
-const mockTransporter = {
-  sendMail: async () => {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    return { messageId: "mock-" + Date.now() };
-  },
-};
-
-// Resolve IPv4 for Render (never throws)
-const resolveIPv4 = async (host) => {
-  try {
-    const ips = await dns.resolve4(host);
-    return ips?.[0] || host;
-  } catch {
-    return host;
-  }
-};
-
-// Get or create transporter (NEVER returns null, always returns something)
-const getTransporter = async () => {
-  // If we already have a working transporter, use it
+// Simple transporter getter
+const getTransporter = () => {
+  // Return existing transporter if valid
   if (transporter) return transporter;
 
   const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
 
-  // If no config, use mock
+  // No config = no emails
   if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
-    console.log("📧 Email config missing - using mock mode");
-    return mockTransporter;
+    return null;
   }
 
   try {
-    const host = await resolveIPv4(EMAIL_HOST);
-
     transporter = nodemailer.createTransport({
-      host,
+      host: EMAIL_HOST,
       port: parseInt(EMAIL_PORT || "587", 10),
       secure: EMAIL_PORT === "465",
       auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-      connectionTimeout: CONFIG.timeout,
-      socketTimeout: CONFIG.timeout,
-      maxConnections: 1,
+      connectionTimeout: 3000,
+      socketTimeout: 3000,
     });
-
-    // Verify connection (don't await - background)
-    transporter.verify().catch(() => {
-      console.log("📧 Email verification failed, will retry on next send");
-      transporter = null;
-    });
-
-    console.log("✅ Email transporter ready");
     return transporter;
   } catch (err) {
-    console.log("📧 Transporter error, using mock:", err.message);
-    return mockTransporter;
+    console.log("📧 Transporter error:", err.message);
+    return null;
   }
 };
 
-// Process queue in background (NEVER crashes)
-const processQueue = async () => {
-  if (isProcessing || emailQueue.length === 0) return;
-
-  isProcessing = true;
-
-  try {
-    while (emailQueue.length > 0) {
-      const { to, subject, html, resolve } = emailQueue.shift();
-
-      try {
-        const result = await sendEmailImmediate(to, subject, html);
-        resolve(result);
-      } catch (err) {
-        // NEVER reject - always resolve with error info
-        resolve({ success: false, error: err.message });
-      }
-
-      // Small delay between emails
-      await new Promise((r) => setTimeout(r, 500));
-    }
-  } catch (err) {
-    console.log("📧 Queue processor error (ignored):", err.message);
-  } finally {
-    isProcessing = false;
-  }
-};
-
-// Immediate send with timeout protection (NEVER throws)
-const sendEmailImmediate = async (to, subject, html) => {
-  // Cooldown check
-  if (
-    failureCount >= CONFIG.maxFailuresBeforeCooldown &&
-    Date.now() - lastFailureTime < CONFIG.cooldownMs
-  ) {
-    console.log("⏸️ Email cooldown active - skipping");
-    return { success: false, error: "Cooldown active", skipped: true };
-  }
-
-  try {
-    const transporter = await getTransporter();
-
-    if (!transporter) {
-      return { success: false, error: "No transporter", mock: true };
-    }
-
-    console.log(`📧 Sending to ${to}`);
-
-    // Race between send and timeout
-    const timeoutPromise = new Promise((resolve) => {
-      setTimeout(() => {
-        console.log(`📧 [TIMEOUT] Email to ${to} timed out`);
-        resolve({ success: false, error: "Timeout", timedOut: true });
-      }, CONFIG.timeout);
-    });
-
-    const sendPromise = transporter
-      .sendMail({
-        from: `"Beeyond Harvest" <${process.env.EMAIL_FROM || process.env.EMAIL_USER || "noreply@beeyondharvest.com"}>`,
-        to,
-        subject,
-        html: html?.substring(0, 50000) || "",
-      })
-      .then((info) => {
-        console.log(`✅ Email sent to ${to}`);
-        failureCount = 0;
-        return { success: true, messageId: info.messageId };
-      })
-      .catch((err) => {
-        console.log(`❌ Email failed (${err.message})`);
-        failureCount++;
-        lastFailureTime = Date.now();
-
-        // Reset transporter on network errors
-        if (
-          ["ECONNECTION", "ETIMEDOUT", "EAUTH", "ESOCKET"].includes(err.code)
-        ) {
-          transporter = null;
-        }
-
-        return { success: false, error: err.message };
-      });
-
-    const result = await Promise.race([sendPromise, timeoutPromise]);
-    return result;
-  } catch (err) {
-    // CATCH EVERYTHING - NEVER THROW
-    console.log(`📧 Email exception (ignored):`, err.message);
-    failureCount++;
-    lastFailureTime = Date.now();
-    return { success: false, error: err.message, exception: true };
-  }
-};
-
-// PUBLIC: Async email - NEVER throws, always returns
-const sendEmail = async (to, subject, html) => {
-  // Always return a promise that resolves (never rejects)
-  return new Promise((resolve) => {
-    if (!to || !subject) {
-      resolve({ success: false, error: "Invalid email data" });
+// ULTRA SIMPLE - No queue, just fire and forget with timeout
+const sendEmail = (to, subject, html) => {
+  // Return immediately - don't wait
+  setImmediate(() => {
+    // Check cooldown
+    if (consecutiveFailures >= 3 && Date.now() - lastFailureTime < 60000) {
+      console.log("📧 Email cooldown active - skipping");
       return;
     }
 
-    emailQueue.push({ to, subject, html, resolve });
-    processQueue().catch(() => {}); // Silent catch
+    const transporter = getTransporter();
+    if (!transporter) {
+      console.log("📧 No transporter - skipping email");
+      return;
+    }
+
+    if (!to || !subject) {
+      console.log("📧 Invalid email data - skipping");
+      return;
+    }
+
+    // Create timeout
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Timeout")), 3000);
+    });
+
+    const sendPromise = transporter.sendMail({
+      from: `"Beeyond Harvest" <${process.env.EMAIL_USER}>`,
+      to,
+      subject,
+      html: (html || "").substring(0, 30000),
+    });
+
+    Promise.race([sendPromise, timeoutPromise])
+      .then(() => {
+        console.log(`✅ Email sent to ${to}`);
+        consecutiveFailures = 0;
+        clearTimeout(timeoutId);
+      })
+      .catch((err) => {
+        console.log(`❌ Email failed (${err.message})`);
+        consecutiveFailures++;
+        lastFailureTime = Date.now();
+        transporter = null; // Reset on failure
+        clearTimeout(timeoutId);
+      });
   });
+
+  // Return immediately - never wait
+  return Promise.resolve({ success: true, queued: true });
 };
 
-// Order confirmation helper - SAFE version
-const sendOrderConfirmation = async (order, email) => {
-  try {
-    const subject = `Order Confirmed - ${order.orderNumber}`;
-    const html = `
-      <h2>Order Confirmed ✅</h2>
-      <p>Order #: ${order.orderNumber}</p>
-      <p>Total: ৳${order.total?.toLocaleString() || 0}</p>
-      <p>Thank you for shopping with Beeyond Harvest!</p>
-      <p>We'll notify you when your order ships.</p>
-    `;
-    return await sendEmail(email, subject, html);
-  } catch (err) {
-    // NEVER throw
-    return { success: false, error: err.message };
-  }
+// Order confirmation
+const sendOrderConfirmation = (order, email) => {
+  const subject = `Order Confirmed - ${order.orderNumber}`;
+  const html = `
+    <h2>Order Confirmed ✅</h2>
+    <p>Order #: ${order.orderNumber}</p>
+    <p>Total: ৳${order.total?.toLocaleString() || 0}</p>
+    <p>Thank you for shopping with Beeyond Harvest!</p>
+  `;
+  return sendEmail(email, subject, html);
 };
 
 module.exports = {
