@@ -232,7 +232,7 @@ const createOrder = async (req, res) => {
 
     const orderNumber = `ORD-${date.getFullYear()}${String(
       date.getMonth() + 1,
-    ).padStart(2, "0")}-${timestamp}${random}`;
+    ).padStart(2, "0")}-${timestamp}`;
 
     // ==============================
     // 🔥 CREATE ORDER
@@ -643,9 +643,7 @@ const getSalesAnalytics = async (req, res) => {
     const { period = "monthly" } = req.query;
     console.log(`📈 [ANALYTICS] Fetching ${period} sales data`);
     const groupBy =
-      period === "weekly"
-        ? { $week: "$createdAt" }
-        : { $month: "$createdAt" };
+      period === "weekly" ? { $week: "$createdAt" } : { $month: "$createdAt" };
 
     const salesData = await Order.aggregate([
       { $match: { orderStatus: "delivered" } },
