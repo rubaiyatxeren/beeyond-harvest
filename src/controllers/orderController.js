@@ -222,17 +222,13 @@ const createOrder = async (req, res) => {
     const total = subtotal + (deliveryCharge || 60);
 
     // ==============================
-    // ✅ FIX 1: ORDER NUMBER — no race condition
+    // ✅ ORDER NUMBER — collision-safe
     // ==============================
     const date = new Date();
-    const timestamp = Date.now().toString().slice(-6);
-    const random = Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, "0");
-
+    const fiveDigit = Date.now().toString().slice(-5);
     const orderNumber = `ORD-${date.getFullYear()}${String(
       date.getMonth() + 1,
-    ).padStart(2, "0")}-${timestamp}${random}`;
+    ).padStart(2, "0")}-${fiveDigit}`;
 
     // ==============================
     // 🔥 CREATE ORDER
@@ -257,7 +253,7 @@ const createOrder = async (req, res) => {
     console.log(`✅ Order created: ${order.orderNumber}`);
 
     // ==============================
-    // ✅ FIX 2: ATOMIC STOCK UPDATE — prevents overselling
+    // ✅ ATOMIC STOCK UPDATE — prevents overselling
     // ==============================
     const bulkOps = items.map((item) => ({
       updateOne: {
@@ -269,7 +265,6 @@ const createOrder = async (req, res) => {
     const stockResult = await Product.bulkWrite(bulkOps);
 
     if (stockResult.modifiedCount !== items.length) {
-      // Roll back order if stock was insufficient
       await Order.findByIdAndDelete(order._id);
       console.warn("⚠️ Stock mismatch — order rolled back");
       return res.status(400).json({
@@ -290,44 +285,38 @@ const createOrder = async (req, res) => {
     });
 
     // ==============================
-    // 🔔 BACKGROUND EMAIL (NON-BLOCKING)
+    // ✅ BACKGROUND EMAIL — fully safe, no unhandled rejections
     // ==============================
     if (process.env.DISABLE_EMAIL === "true") return;
 
     setImmediate(async () => {
-      try {
-        console.log(`📧 Sending emails for ${order.orderNumber}`);
+      const adminEmails = (process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com")
+        .split(",")
+        .map((e) => e.trim())
+        .filter(Boolean);
 
-        // Customer email
-        await sendEmail(
+      const adminHtml = generateAdminEmailTemplate(order, "new_order");
+
+      const results = await Promise.allSettled([
+        sendEmail(
           order.customer.email,
           `🎉 Order Confirmed - ${order.orderNumber}`,
           generateOrderEmailTemplate(order, "new_order"),
-        ).catch((err) =>
-          console.error("❌ Customer email failed:", err.message),
-        );
+        ),
+        ...adminEmails.map((email) =>
+          sendEmail(email, `🆕 New Order #${order.orderNumber}`, adminHtml),
+        ),
+      ]);
 
-        // Admin emails
-        const adminEmails = (
-          process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
-        ).split(",");
-
-        const adminHtml = generateAdminEmailTemplate(order, "new_order");
-
-        adminEmails.map((email) =>
-          sendEmail(
-            email.trim(),
-            `🆕 New Order #${order.orderNumber}`,
-            adminHtml,
-          ).catch((err) =>
-            console.error(`❌ Admin email failed (${email}):`, err.message),
-          ),
-        );
-
-        console.log(`✅ Emails sent for ${order.orderNumber}`);
-      } catch (err) {
-        console.error("❌ Email error:", err.message);
-      }
+      results.forEach((r, i) => {
+        const target = i === 0 ? order.customer.email : adminEmails[i - 1];
+        if (r.status === "fulfilled" && r.value?.success) {
+          console.log(`✅ [EMAIL] Sent → ${target}`);
+        } else {
+          const reason = r.reason?.message || r.value?.error || "unknown";
+          console.error(`❌ [EMAIL] Failed → ${target}: ${reason}`);
+        }
+      });
     });
   } catch (error) {
     console.error("❌ Create order error:", error.message);
