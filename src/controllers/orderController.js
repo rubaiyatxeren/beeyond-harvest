@@ -225,7 +225,10 @@ const createOrder = async (req, res) => {
     // ✅ ORDER NUMBER — collision-safe
     // ==============================
     const date = new Date();
-    const fiveDigit = Date.now().toString().slice(-5);
+
+    // generate always 5-digit number (10000 → 99999)
+    const fiveDigit = Math.floor(10000 + Math.random() * 90000);
+
     const orderNumber = `ORD-${date.getFullYear()}${String(
       date.getMonth() + 1,
     ).padStart(2, "0")}-${fiveDigit}`;
