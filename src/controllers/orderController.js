@@ -224,15 +224,14 @@ const createOrder = async (req, res) => {
     // ==============================
     // ✅ FIX 1: ORDER NUMBER — no race condition
     // ==============================
-    const date = new Date();
-    const timestamp = Date.now().toString().slice(-6);
-    const random = Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, "0");
+    const now = new Date();
 
-    const orderNumber = `ORD-${date.getFullYear()}${String(
-      date.getMonth() + 1,
-    ).padStart(2, "0")}-${timestamp}`;
+    // 5-digit number
+    const fiveDigit = Math.floor(10000 + Math.random() * 90000);
+
+    const orderNumber = `ORD-${now.getFullYear()}${String(
+      now.getMonth() + 1,
+    ).padStart(2, "0")}-${fiveDigit}`;
 
     // ==============================
     // 🔥 CREATE ORDER
