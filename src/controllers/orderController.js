@@ -148,18 +148,20 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 
-// @desc    Create order
+// @desc    Create order (OPTIMIZED - non-blocking)
 // @route   POST /api/orders
 // @access  Public
 const createOrder = async (req, res) => {
+  const startTime = Date.now();
+
   try {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("📦 [ORDER] New order request received");
 
     const { items, customer, paymentMethod, deliveryCharge } = req.body;
 
-    // ✅ VALIDATION
-    if (!items || !items.length) {
+    // ✅ QUICK VALIDATION (fail fast)
+    if (!items?.length) {
       return res
         .status(400)
         .json({ success: false, message: "No items in order" });
@@ -172,11 +174,8 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // ==============================
-    // 🔥 FETCH ALL PRODUCTS IN ONE QUERY
-    // ==============================
+    // Fetch products in ONE query
     const productIds = items.map((i) => i.product);
-
     const products = await Product.find({
       _id: { $in: productIds },
     }).lean();
@@ -186,9 +185,7 @@ const createOrder = async (req, res) => {
     let subtotal = 0;
     const orderItems = [];
 
-    // ==============================
-    // 🔥 PROCESS & VALIDATE ITEMS
-    // ==============================
+    // Validate stock and calculate
     for (const item of items) {
       const product = productMap.get(item.product);
 
@@ -202,7 +199,7 @@ const createOrder = async (req, res) => {
       if (product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for "${product.name}". Available: ${product.stock}`,
+          message: `Insufficient stock for "${product.name}"`,
         });
       }
 
@@ -219,23 +216,15 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const total = subtotal + (deliveryCharge || 60);
+    const finalDeliveryCharge = deliveryCharge || 60;
+    const total = subtotal + finalDeliveryCharge;
 
-    // ==============================
-    // ✅ FIX 1: ORDER NUMBER — no race condition
-    // ==============================
+    // Generate order number (fast, no DB call needed)
     const now = new Date();
-
-    // 5-digit number
     const fiveDigit = Math.floor(10000 + Math.random() * 90000);
+    const orderNumber = `ORD-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${fiveDigit}`;
 
-    const orderNumber = `ORD-${now.getFullYear()}${String(
-      now.getMonth() + 1,
-    ).padStart(2, "0")}-${fiveDigit}`;
-
-    // ==============================
-    // 🔥 CREATE ORDER
-    // ==============================
+    // CREATE ORDER
     const order = await Order.create({
       orderNumber,
       customer: {
@@ -246,18 +235,18 @@ const createOrder = async (req, res) => {
       },
       items: orderItems,
       subtotal,
-      deliveryCharge: deliveryCharge || 60,
+      deliveryCharge: finalDeliveryCharge,
       total,
       paymentMethod: paymentMethod || "cash_on_delivery",
       paymentStatus: "pending",
       orderStatus: "pending",
     });
 
-    console.log(`✅ Order created: ${order.orderNumber}`);
+    console.log(
+      `✅ Order created: ${order.orderNumber} in ${Date.now() - startTime}ms`,
+    );
 
-    // ==============================
-    // ✅ FIX 2: ATOMIC STOCK UPDATE — prevents overselling
-    // ==============================
+    // UPDATE STOCK (atomic)
     const bulkOps = items.map((item) => ({
       updateOne: {
         filter: { _id: item.product, stock: { $gte: item.quantity } },
@@ -268,7 +257,6 @@ const createOrder = async (req, res) => {
     const stockResult = await Product.bulkWrite(bulkOps);
 
     if (stockResult.modifiedCount !== items.length) {
-      // Roll back order if stock was insufficient
       await Order.findByIdAndDelete(order._id);
       console.warn("⚠️ Stock mismatch — order rolled back");
       return res.status(400).json({
@@ -277,57 +265,49 @@ const createOrder = async (req, res) => {
       });
     }
 
-    console.log("✅ Stock updated atomically");
-
-    // ==============================
-    // ✅ RESPONSE FIRST (FAST API)
-    // ==============================
+    // ✅ SEND RESPONSE IMMEDIATELY (DON'T WAIT FOR EMAILS)
     res.status(201).json({
       success: true,
       data: order,
       message: "Order created successfully",
     });
 
-    // ==============================
-    // 🔔 BACKGROUND EMAIL (NON-BLOCKING)
-    // ==============================
-    if (process.env.DISABLE_EMAIL === "true") return;
+    // 🔥 FIRE AND FORGET - EMAILS IN BACKGROUND (NON-BLOCKING)
+    if (process.env.DISABLE_EMAIL !== "true") {
+      // Use setImmediate to defer email sending
+      setImmediate(async () => {
+        try {
+          console.log(`📧 Background emails for ${order.orderNumber}`);
 
-    setImmediate(async () => {
-      try {
-        console.log(`📧 Sending emails for ${order.orderNumber}`);
-
-        // Customer email
-        await sendEmail(
-          order.customer.email,
-          `🎉 Order Confirmed - ${order.orderNumber}`,
-          generateOrderEmailTemplate(order, "new_order"),
-        ).catch((err) =>
-          console.error("❌ Customer email failed:", err.message),
-        );
-
-        // Admin emails
-        const adminEmails = (
-          process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
-        ).split(",");
-
-        const adminHtml = generateAdminEmailTemplate(order, "new_order");
-
-        adminEmails.map((email) =>
+          // Customer email (don't await - fire and forget)
           sendEmail(
-            email.trim(),
-            `🆕 New Order #${order.orderNumber}`,
-            adminHtml,
-          ).catch((err) =>
-            console.error(`❌ Admin email failed (${email}):`, err.message),
-          ),
-        );
+            order.customer.email,
+            `🎉 Order Confirmed - ${order.orderNumber}`,
+            generateOrderEmailTemplate(order, "new_order"),
+          ).catch((err) => console.error("❌ Customer email:", err.message));
 
-        console.log(`✅ Emails sent for ${order.orderNumber}`);
-      } catch (err) {
-        console.error("❌ Email error:", err.message);
-      }
-    });
+          // Admin emails (fire in parallel, don't await)
+          const adminEmails = (
+            process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
+          ).split(",");
+          const adminHtml = generateAdminEmailTemplate(order, "new_order");
+
+          adminEmails.forEach((email) => {
+            sendEmail(
+              email.trim(),
+              `🆕 New Order #${order.orderNumber}`,
+              adminHtml,
+            ).catch((err) =>
+              console.error(`❌ Admin email (${email}):`, err.message),
+            );
+          });
+
+          console.log(`✅ Emails queued for ${order.orderNumber}`);
+        } catch (err) {
+          console.error("❌ Email background error:", err.message);
+        }
+      });
+    }
   } catch (error) {
     console.error("❌ Create order error:", error.message);
     res.status(500).json({
