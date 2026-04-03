@@ -48,7 +48,7 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
           <tr>
             <td style="width:44px;height:44px;min-width:44px;background:linear-gradient(135deg,#FEF3CD,#FDD882);border-radius:10px;text-align:center;vertical-align:middle;font-size:20px;line-height:44px;">🛒</td>
             <td style="padding-left:12px;vertical-align:middle;">
-              <div style="font-weight:700;color:#0D1B3E;font-size:14px;line-height:1.4;margin:0;">${item.name}</div>
+              <div style="font-weight:700;color:#0D1B3E;font-size:12px;line-height:1.4;margin:0;">${item.name}</div>
               <div style="color:#6B7A99;font-size:12px;margin:3px 0 0;">SKU: ${item.sku || "N/A"}</div>
             </td>
           </tr>
