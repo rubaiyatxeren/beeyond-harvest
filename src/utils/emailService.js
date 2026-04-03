@@ -1,21 +1,18 @@
-// utils/emailService.js - ULTRA LIGHT, NO QUEUE, NO BLOCKING
-// This version uses setImmediate and NEVER keeps the event loop busy
-
+// utils/emailService.js - WILL SEND EMAILS, NO CRASHES
 const nodemailer = require("nodemailer");
 
 let transporter = null;
 let consecutiveFailures = 0;
 let lastFailureTime = 0;
 
-// Simple transporter getter
+// Get transporter - reuses if working
 const getTransporter = () => {
-  // Return existing transporter if valid
   if (transporter) return transporter;
 
   const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_PORT } = process.env;
 
-  // No config = no emails
   if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS) {
+    console.log("📧 Email config missing - emails disabled");
     return null;
   }
 
@@ -25,9 +22,10 @@ const getTransporter = () => {
       port: parseInt(EMAIL_PORT || "587", 10),
       secure: EMAIL_PORT === "465",
       auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-      connectionTimeout: 3000,
-      socketTimeout: 3000,
+      connectionTimeout: 5000,
+      socketTimeout: 5000,
     });
+    console.log("✅ Email transporter ready");
     return transporter;
   } catch (err) {
     console.log("📧 Transporter error:", err.message);
@@ -35,60 +33,68 @@ const getTransporter = () => {
   }
 };
 
-// ULTRA SIMPLE - No queue, just fire and forget with timeout
+// Send email - ALWAYS returns immediately, NEVER blocks
 const sendEmail = (to, subject, html) => {
-  // Return immediately - don't wait
-  setImmediate(() => {
-    // Check cooldown
+  // Return a promise that resolves immediately
+  return new Promise((resolve) => {
+    // Skip if no recipient
+    if (!to || !subject) {
+      console.log("📧 Skipping - invalid email data");
+      resolve({ success: false, error: "Invalid data" });
+      return;
+    }
+
+    // Check cooldown after multiple failures
     if (consecutiveFailures >= 3 && Date.now() - lastFailureTime < 60000) {
       console.log("📧 Email cooldown active - skipping");
+      resolve({ success: false, error: "Cooldown" });
       return;
     }
 
     const transporter = getTransporter();
     if (!transporter) {
-      console.log("📧 No transporter - skipping email");
+      console.log("📧 No transporter - skipping");
+      resolve({ success: false, error: "No transporter" });
       return;
     }
 
-    if (!to || !subject) {
-      console.log("📧 Invalid email data - skipping");
-      return;
-    }
-
-    // Create timeout
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error("Timeout")), 3000);
-    });
-
+    // Send email in background - don't await
     const sendPromise = transporter.sendMail({
       from: `"Beeyond Harvest" <${process.env.EMAIL_USER}>`,
       to,
       subject,
-      html: (html || "").substring(0, 30000),
+      html: (html || "").substring(0, 50000),
     });
 
-    Promise.race([sendPromise, timeoutPromise])
-      .then(() => {
+    // Set timeout
+    const timeoutId = setTimeout(() => {
+      console.log(`📧 Timeout sending to ${to}`);
+      consecutiveFailures++;
+      lastFailureTime = Date.now();
+      transporter = null;
+      resolve({ success: false, error: "Timeout" });
+    }, 5000);
+
+    // Handle result
+    sendPromise
+      .then((info) => {
+        clearTimeout(timeoutId);
         console.log(`✅ Email sent to ${to}`);
         consecutiveFailures = 0;
-        clearTimeout(timeoutId);
+        resolve({ success: true, messageId: info.messageId });
       })
       .catch((err) => {
-        console.log(`❌ Email failed (${err.message})`);
+        clearTimeout(timeoutId);
+        console.log(`❌ Email failed to ${to}: ${err.message}`);
         consecutiveFailures++;
         lastFailureTime = Date.now();
-        transporter = null; // Reset on failure
-        clearTimeout(timeoutId);
+        transporter = null;
+        resolve({ success: false, error: err.message });
       });
   });
-
-  // Return immediately - never wait
-  return Promise.resolve({ success: true, queued: true });
 };
 
-// Order confirmation
+// Order confirmation helper
 const sendOrderConfirmation = (order, email) => {
   const subject = `Order Confirmed - ${order.orderNumber}`;
   const html = `
