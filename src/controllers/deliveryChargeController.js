@@ -16,58 +16,88 @@ exports.getDeliveryCharges = async (req, res) => {
   }
 };
 
-// Add at the top of deliveryChargeController.js
-let cachedCharges = null;
-let cacheTimestamp = null;
-const CACHE_TTL = 60000; // 1 minute cache
-
-// Modify getActiveDeliveryCharge function
+// Get active delivery charge (for customers)
 exports.getActiveDeliveryCharge = async (req, res) => {
   console.log("📦 GET /api/delivery-charges/active called", req.query);
-
   try {
     const { city, subtotal } = req.query;
     const orderAmount = parseFloat(subtotal) || 0;
 
-    // Use cache for charges (reduces DB calls)
-    let allCharges;
-    if (cachedCharges && Date.now() - cacheTimestamp < CACHE_TTL) {
-      allCharges = cachedCharges;
-      console.log("📦 Using cached delivery charges");
-    } else {
-      allCharges = await DeliveryCharge.find({ isActive: true });
-      cachedCharges = allCharges;
-      cacheTimestamp = Date.now();
-      console.log(`📦 Fetched ${allCharges.length} delivery charges from DB`);
+    console.log(`Order amount: ${orderAmount}, City: ${city}`);
+
+    // Get all active delivery charges
+    const allCharges = await DeliveryCharge.find({ isActive: true });
+    console.log(`Found ${allCharges.length} active charges`);
+
+    // Log all charges for debugging
+    console.log("Available charges:");
+    allCharges.forEach((charge) => {
+      console.log(
+        `  - ${charge.name}: ৳${charge.amount} (min: ${charge.minOrderAmount})`,
+      );
+    });
+
+    let standardCharge = null;
+    let specialCharge = null;
+
+    // STEP 1: Get the standard charge based on city
+    if (city && city.toLowerCase() === "dhaka") {
+      // Inside Dhaka - use inside_dhaka charge
+      standardCharge = allCharges.find((c) => c.name === "inside_dhaka");
+      console.log(
+        `📍 Dhaka detected - standard charge: ${standardCharge?.amount || 60}`,
+      );
+    } else if (city) {
+      // Outside Dhaka - use outside_dhaka charge
+      standardCharge = allCharges.find((c) => c.name === "outside_dhaka");
+      console.log(
+        `📍 Outside Dhaka (${city}) - standard charge: ${standardCharge?.amount || 120}`,
+      );
     }
 
-    // Quick response - no heavy processing
-    let finalAmount = 60; // default fallback
-    let selectedCharge = { name: "fallback", amount: 60 };
+    // STEP 2: Get special default charge (if applicable)
+    specialCharge = allCharges.find((c) => c.name === "default");
+    console.log(
+      `💰 Special default charge: ${specialCharge?.amount || 0} (min: ${specialCharge?.minOrderAmount || 0})`,
+    );
 
-    // Check for special default charge (min 999)
-    const defaultCharge = allCharges.find((c) => c.name === "default");
+    // STEP 3: Determine which charge to apply
+    let finalAmount = null;
+    let selectedCharge = null;
 
-    if (defaultCharge && orderAmount >= (defaultCharge.minOrderAmount || 999)) {
-      finalAmount = defaultCharge.amount;
-      selectedCharge = defaultCharge;
-    } else if (city?.toLowerCase() === "dhaka") {
-      const dhakaCharge = allCharges.find((c) => c.name === "inside_dhaka");
-      if (dhakaCharge) {
-        finalAmount = dhakaCharge.amount;
-        selectedCharge = dhakaCharge;
+    // If special charge exists and order amount meets minimum requirement
+    if (specialCharge && orderAmount >= specialCharge.minOrderAmount) {
+      finalAmount = specialCharge.amount;
+      selectedCharge = specialCharge;
+      console.log(
+        `✅ Order amount ${orderAmount} >= ${specialCharge.minOrderAmount}, applying special charge: ৳${finalAmount}`,
+      );
+    }
+    // Otherwise, use standard charge
+    else if (standardCharge) {
+      finalAmount = standardCharge.amount;
+      selectedCharge = standardCharge;
+      console.log(`✅ Using standard charge: ৳${finalAmount}`);
+    }
+    // Fallback if no charges found
+    else {
+      // Determine fallback based on city
+      if (city && city.toLowerCase() === "dhaka") {
+        finalAmount = 60;
+        console.log(`⚠️ No charges found, using fallback 60 for Dhaka`);
+      } else if (city) {
+        finalAmount = 120;
+        console.log(
+          `⚠️ No charges found, using fallback 120 for outside Dhaka`,
+        );
+      } else {
+        finalAmount = 60;
+        console.log(`⚠️ No charges found, using fallback 60`);
       }
-    } else if (city) {
-      const outsideCharge = allCharges.find((c) => c.name === "outside_dhaka");
-      if (outsideCharge) {
-        finalAmount = outsideCharge.amount;
-        selectedCharge = outsideCharge;
-      }
+      selectedCharge = { name: "fallback", amount: finalAmount };
     }
 
     console.log(`🎯 Final charge: ${selectedCharge.name} - ৳${finalAmount}`);
-
-    // Send response quickly
     res.json({
       success: true,
       data: {
@@ -78,11 +108,7 @@ exports.getActiveDeliveryCharge = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getActiveDeliveryCharge:", error);
-    // Always return a valid response, even on error
-    res.json({
-      success: true,
-      data: { amount: 60, name: "fallback", minOrderAmount: 0 },
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 // Create or update delivery charge (Admin only)
