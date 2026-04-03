@@ -658,7 +658,15 @@ const createOrder = async (req, res) => {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("📦 [ORDER] New order request received");
 
-    const { items, customer, paymentMethod, deliveryCharge } = req.body;
+    const {
+      items,
+      customer,
+      paymentMethod,
+      deliveryCharge,
+      discount,
+      couponCode,
+      notes,
+    } = req.body;
 
     // ✅ VALIDATION
     if (!items || !items.length) {
@@ -721,7 +729,11 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const total = subtotal + (deliveryCharge || 60);
+    const discountAmount = Math.max(0, parseFloat(discount) || 0);
+    const total = Math.max(
+      0,
+      subtotal + (deliveryCharge || 60) - discountAmount,
+    );
 
     // ==============================
     // ✅ ORDER NUMBER — collision-safe
@@ -748,8 +760,13 @@ const createOrder = async (req, res) => {
       },
       items: orderItems,
       subtotal,
+      discount: discountAmount,
+      coupon: couponCode
+        ? { code: couponCode, discount: discountAmount }
+        : undefined,
       deliveryCharge: deliveryCharge || 60,
       total,
+      notes: notes || "",
       paymentMethod: paymentMethod || "cash_on_delivery",
       paymentStatus: "pending",
       orderStatus: "pending",
