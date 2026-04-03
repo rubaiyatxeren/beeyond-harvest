@@ -13,6 +13,8 @@ const {
   getSalesAnalytics,
   sendManualOrderEmail,
   getOrdersByPhone,
+  getAllCustomerEmails, // ← ADD THIS
+  sendBulkPromotionalEmail, // ← ADD THIS
 } = require("../controllers/orderController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -287,6 +289,10 @@ router.get("/:id", protect, getOrder);
 router.put("/:id/status", protect, updateOrderStatus);
 router.put("/:id/payment", protect, updatePaymentStatus);
 router.post("/:id/send-email", protect, sendManualOrderEmail);
+
+// Customer email routes (Admin only)
+router.get("/customers/emails", protect, getAllCustomerEmails);
+router.post("/customers/bulk-email", protect, sendBulkPromotionalEmail);
 
 router.get("/phone/:phone", getOrdersByPhone);
 
