@@ -152,6 +152,7 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
 // @route   POST /api/orders
 // @access  Public
 // @desc    Create order - ULTRA FAST, NO BACKGROUND PROCESSING
+// @desc    Create order - WILL SEND EMAILS, NO CRASHES
 const createOrder = async (req, res) => {
   const startTime = Date.now();
 
@@ -253,34 +254,25 @@ const createOrder = async (req, res) => {
       message: "Order created successfully",
     });
 
-    // 🔥 FIRE AND FORGET - ONE SIMPLE CALL, NO setImmediate, NO LOOPS
-    // Just call and forget - the email service handles everything internally
-    if (process.env.DISABLE_EMAIL !== "true") {
-      // Customer email - one call
-      sendEmail(
-        order.customer.email,
-        `🎉 Order Confirmed - ${order.orderNumber}`,
-        generateOrderEmailTemplate(order, "new_order"),
-      );
+    // 🔥 SEND EMAILS IN BACKGROUND - WILL NOT BLOCK OR CRASH
+    // Customer email
+    sendEmail(
+      order.customer.email,
+      `🎉 Order Confirmed - ${order.orderNumber}`,
+      generateOrderEmailTemplate(order, "new_order"),
+    );
 
-      // Admin emails - simple loop
-      const adminEmails = (
-        process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
-      ).split(",");
-      const adminHtml = generateAdminEmailTemplate(order, "new_order");
+    // Admin emails
+    const adminEmails = (
+      process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
+    ).split(",");
+    const adminHtml = generateAdminEmailTemplate(order, "new_order");
 
-      adminEmails.forEach((email) => {
-        sendEmail(
-          email.trim(),
-          `🆕 New Order #${order.orderNumber}`,
-          adminHtml,
-        );
-      });
+    adminEmails.forEach((email) => {
+      sendEmail(email.trim(), `🆕 New Order #${order.orderNumber}`, adminHtml);
+    });
 
-      console.log(`📧 Emails triggered for ${order.orderNumber}`);
-    } else {
-      console.log(`📧 Emails disabled for ${order.orderNumber}`);
-    }
+    console.log(`📧 Emails triggered for ${order.orderNumber}`);
   } catch (error) {
     console.error("❌ Create order error:", error.message);
     res.status(500).json({
