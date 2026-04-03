@@ -94,18 +94,14 @@ const limiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-
   keyGenerator: (req) => {
     const forwarded = req.headers["x-forwarded-for"];
     let ip = forwarded ? forwarded.split(",")[0].trim() : req.ip;
-
     if (ip && ip.includes(":")) {
       ip = ip.split(":").slice(0, -1).join(":");
     }
-
     return ip;
   },
-
   validate: {
     xForwardedForHeader: false,
     keyGeneratorIpFallback: false,
@@ -171,30 +167,8 @@ app.use((req, res) => {
 // ✅ GLOBAL ERROR HANDLER
 app.use(errorHandler);
 
-// ✅ CRASH SAFETY (SMART VERSION)
-
-// Unhandled Promise Rejection
-process.on("unhandledRejection", (reason) => {
-  console.error("❌ Unhandled Rejection:", reason);
-
-  if (reason?.name === "MongoNetworkError") {
-    console.error("❌ Critical DB error → Restarting...");
-    process.exit(1);
-  }
-});
-
-// Uncaught Exception
-process.on("uncaughtException", (err) => {
-  console.error("❌ Uncaught Exception:", err.message, err.stack);
-
-  if (
-    err.code === "ERR_USE_AFTER_FREE" ||
-    err.code === "ENOMEM" ||
-    err.name === "MongoNetworkError"
-  ) {
-    console.error("❌ Fatal error → Restarting...");
-    process.exit(1);
-  }
-});
+// ❌ REMOVED: duplicate unhandledRejection + uncaughtException handlers
+// These are handled correctly in server.js with graceful shutdown.
+// Having them here caused double-firing and bypassed cleanup.
 
 module.exports = app;
