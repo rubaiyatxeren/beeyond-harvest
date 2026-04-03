@@ -1404,142 +1404,366 @@ const sendBulkPromotionalEmail = async (req, res) => {
   }
 };
 
-// Generate promotional email template
 const generatePromotionalEmailTemplate = (
   subject,
   message,
   offerDetails,
   couponCode,
+  recipientName = "{name}",
 ) => {
   const hasOffer = offerDetails && offerDetails.trim();
   const hasCoupon = couponCode && couponCode.trim();
+  const shopUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+  const year = new Date().getFullYear();
 
-  return `<!DOCTYPE html>
-<html lang="bn">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>${subject}</title>
-</head>
-<body style="margin:0;padding:0;background:#F5F0E8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
-
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;padding:24px 16px;">
-<tr><td align="center">
-<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;">
-
-  <!-- Header -->
-  <tr><td>
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E 0%,#1A2E5A 60%,#0D1B3E 100%);border-radius:24px 24px 0 0;overflow:hidden;">
-      <tr><td style="padding:40px 40px 20px;text-align:center;">
-        <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+  /* ── Offer block (injected only when offerDetails is provided) ── */
+  const offerBlock = hasOffer
+    ? `
+        <!-- Offer card -->
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+               style="background:linear-gradient(135deg,#0D1B3E 0%,#1A2E5A 100%);
+                      border-radius:16px;margin:0 0 24px;">
           <tr>
-            <td style="background:linear-gradient(135deg,#F5A623,#C47F11);border-radius:14px;width:52px;height:52px;text-align:center;vertical-align:middle;font-size:26px;line-height:52px;">🐝</td>
-            <td style="padding-left:12px;text-align:left;vertical-align:middle;">
-              <div style="font-size:22px;font-weight:800;color:white;letter-spacing:0.5px;">BeeHarvest</div>
-              <div style="font-size:11px;color:#FDD882;margin-top:2px;">বাংলাদেশের বিশ্বস্ত অনলাইন শপ</div>
+            <td style="padding:24px 28px;text-align:center;">
+              <p style="margin:0 0 8px;font-size:13px;
+                        color:rgba(255,255,255,0.65);line-height:1;">
+                🎉 Special Offer
+              </p>
+              <p style="margin:0;font-size:26px;font-weight:800;
+                        color:#FDD882;line-height:1.2;">
+                ${offerDetails}
+              </p>
+              ${
+                hasCoupon
+                  ? `
+              <!-- Coupon pill -->
+              <table cellpadding="0" cellspacing="0" role="presentation"
+                     style="margin:14px auto 0;">
+                <tr>
+                  <td style="background:rgba(255,255,255,0.1);border-radius:12px;
+                             padding:12px 24px;text-align:center;">
+                    <p style="margin:0 0 4px;font-size:10px;letter-spacing:1.5px;
+                              color:rgba(255,255,255,0.45);">USE COUPON CODE</p>
+                    <p style="margin:0;font-family:'Courier New',Courier,monospace;
+                              font-size:26px;font-weight:800;letter-spacing:4px;
+                              color:#FDD882;">
+                      ${couponCode}
+                    </p>
+                  </td>
+                </tr>
+              </table>`
+                  : ""
+              }
             </td>
           </tr>
-        </table>
-        <h1 style="margin:0 0 10px;color:white;font-size:28px;font-weight:800;line-height:1.25;">✨ Special Offer Just for You!</h1>
-        <p style="margin:0 0 32px;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.6;">Hello <strong style="color:#FDD882;">{name}</strong>, we have something exciting for you!</p>
-      </td></tr>
-      <tr><td style="line-height:0;font-size:0;">
-        <svg width="100%" height="40" viewBox="0 0 600 40" preserveAspectRatio="none">
-          <path d="M0,0 C150,40 450,0 600,40 L600,40 L0,40 Z" fill="#FFF9F0"/>
-        </svg>
-      </td></tr>
-    </table>
-  </td></tr>
+        </table>`
+    : "";
 
-  <!-- Body -->
-  <tr><td style="background:#FFF9F0;padding:0 32px;">
-    
-    <div style="padding:28px 0 0;">
-      <p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.7;">
-        ${message}
-      </p>
-    </div>
-
-    ${
-      hasOffer
-        ? `
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:16px;margin-bottom:20px;">
-      <tr><td style="padding:24px 28px;text-align:center;">
-        <div style="font-size:14px;color:rgba(255,255,255,0.7);margin-bottom:8px;">🎉 Special Offer</div>
-        <div style="font-size:24px;font-weight:800;color:#FDD882;margin-bottom:8px;">${offerDetails}</div>
-        ${
-          hasCoupon
-            ? `
-          <div style="background:rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-top:12px;">
-            <div style="font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:1px;">USE COUPON CODE</div>
-            <div style="font-family:'Courier New',monospace;font-size:24px;font-weight:800;color:#FDD882;letter-spacing:2px;">${couponCode}</div>
-          </div>
-        `
-            : ""
-        }
-      </td></tr>
-    </table>
-    `
-        : ""
+  /* ── Full HTML template ── */
+  return `<!DOCTYPE html>
+<html lang="bn" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>${subject}</title>
+  <!--[if mso]>
+  <noscript>
+    <xml><o:OfficeDocumentSettings>
+      <o:PixelsPerInch>96</o:PixelsPerInch>
+    </o:OfficeDocumentSettings></xml>
+  </noscript>
+  <![endif]-->
+  <style>
+    /* Reset */
+    body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
+    table,td{mso-table-lspace:0;mso-table-rspace:0}
+    img{-ms-interpolation-mode:bicubic;border:0;height:auto;line-height:100%;outline:none;text-decoration:none}
+    body{margin:0;padding:0;background:#F5F0E8}
+ 
+    /* Responsive */
+    @media only screen and (max-width:600px){
+      .email-wrapper{padding:12px 8px !important}
+      .email-body{padding:0 18px !important}
+      .hero-title{font-size:22px !important}
+      .hero-pad{padding:28px 20px 14px !important}
+      .trust-cell{padding:12px 4px !important}
+      .trust-icon{font-size:20px !important}
+      .trust-title{font-size:10px !important}
+      .trust-sub{font-size:9px !important}
+      .cta-btn{padding:13px 28px !important;font-size:14px !important}
+      .footer-pad{padding:22px 20px !important}
     }
-
-    <!-- CTA Button -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
-      <tr><td align="center">
-        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/shop"
-          style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:800;letter-spacing:0.3px;">
-          🛍️ Shop Now & Save
-        </a>
-      </td></tr>
-    </table>
-
-    <!-- Trust badges -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;border:1px solid #F0E8D8;border-radius:14px;overflow:hidden;">
-      <tr>
-        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
-          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🚚</div>
-          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Free Delivery</div>
-          <div style="font-size:10px;color:#6B7A99;">On orders over ৳1000</div>
-        </td>
-        <td width="1" style="background:#F0E8D8;padding:0;"></td>
-        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
-          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🛡️</div>
-          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Secure Payment</div>
-          <div style="font-size:10px;color:#6B7A99;">100% Protected</div>
-        </td>
-        <td width="1" style="background:#F0E8D8;padding:0;"></td>
-        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
-          <div style="font-size:26px;line-height:1;margin-bottom:7px;">↩️</div>
-          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">Easy Returns</div>
-          <div style="font-size:10px;color:#6B7A99;">7 days hassle-free</div>
-        </td>
-      </tr>
-    </table>
-
-  </td></tr>
-
-  <!-- Footer -->
-  <tr><td>
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0D1B3E;border-radius:0 0 24px 24px;">
-      <tr><td style="padding:30px 32px;text-align:center;">
-        <div style="margin-bottom:16px;">
-          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Facebook</a>
-          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">WhatsApp</a>
-          <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Instagram</a>
-        </div>
-        <p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;">🌾 BeeHarvest — সরাসরি ফার্ম থেকে আপনার দরজায়</p>
-        <p style="margin:0 0 10px;font-size:12px;color:rgba(255,255,255,0.35);">সাহায্যের জন্য: <a href="mailto:support@beeharvest.com.bd" style="color:#FDD882;text-decoration:none;">support@beeharvest.com.bd</a></p>
-        <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);">© ${new Date().getFullYear()} BeeHarvest. সর্বস্বত্ব সংরক্ষিত।</p>
-        <p style="margin-top:12px;font-size:10px;color:rgba(255,255,255,0.15);">You're receiving this email because you've shopped with BeeHarvest.</p>
-      </td></tr>
-    </table>
-  </td></tr>
-
-  <tr><td style="height:24px;"></td></tr>
-
-</table>
-</td></tr>
-</table>
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#F5F0E8;
+             font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+ 
+  <!-- Outer wrapper -->
+  <table class="email-wrapper" width="100%" cellpadding="0" cellspacing="0"
+         role="presentation"
+         style="background:#F5F0E8;padding:28px 16px;">
+    <tr>
+      <td align="center">
+ 
+        <!-- Container -->
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+               style="max-width:600px;">
+ 
+          <!-- ══════════════ HEADER ══════════════ -->
+          <tr>
+            <td>
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+                     style="background:linear-gradient(135deg,#0D1B3E 0%,#1A2E5A 60%,#0D1B3E 100%);
+                            border-radius:24px 24px 0 0;overflow:hidden;">
+ 
+                <!-- Brand row -->
+                <tr>
+                  <td class="hero-pad" style="padding:40px 40px 20px;text-align:center;">
+ 
+                    <!-- Logo -->
+                    <table cellpadding="0" cellspacing="0" role="presentation"
+                           style="margin:0 auto 28px;">
+                      <tr>
+                        <td style="background:linear-gradient(135deg,#F5A623,#C47F11);
+                                   border-radius:14px;width:52px;height:52px;
+                                   text-align:center;vertical-align:middle;
+                                   font-size:26px;line-height:52px;">
+                          🐝
+                        </td>
+                        <td style="padding-left:12px;text-align:left;vertical-align:middle;">
+                          <p style="margin:0;font-size:22px;font-weight:800;
+                                    color:#FFFFFF;letter-spacing:0.5px;">
+                            BeeHarvest
+                          </p>
+                          <p style="margin:3px 0 0;font-size:11px;color:#FDD882;">
+                            বাংলাদেশের বিশ্বস্ত অনলাইন শপ
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+ 
+                    <!-- Hero heading -->
+                    <h1 class="hero-title"
+                        style="margin:0 0 10px;color:#FFFFFF;font-size:28px;
+                               font-weight:800;line-height:1.25;">
+                      ✨ ${subject}
+                    </h1>
+ 
+                    <!-- Greeting -->
+                    <p style="margin:0 0 32px;color:rgba(255,255,255,0.65);
+                              font-size:14px;line-height:1.6;">
+                      Hello
+                      <strong style="color:#FDD882;">${recipientName}</strong>,
+                      we have something exciting for you!
+                    </p>
+ 
+                  </td>
+                </tr>
+ 
+                <!-- Wave divider -->
+                <tr>
+                  <td style="line-height:0;font-size:0;">
+                    <svg width="100%" height="40" viewBox="0 0 600 40"
+                         preserveAspectRatio="none"
+                         xmlns="http://www.w3.org/2000/svg">
+                      <path d="M0,0 C150,40 450,0 600,40 L600,40 L0,40 Z"
+                            fill="#FFF9F0"/>
+                    </svg>
+                  </td>
+                </tr>
+ 
+              </table>
+            </td>
+          </tr>
+          <!-- ══════════════ END HEADER ══════════════ -->
+ 
+          <!-- ══════════════ BODY ══════════════ -->
+          <tr>
+            <td class="email-body"
+                style="background:#FFF9F0;padding:0 36px;">
+ 
+              <!-- Message text -->
+              <p style="margin:28px 0 24px;font-size:15px;color:#374151;line-height:1.75;">
+                ${message}
+              </p>
+ 
+              ${offerBlock}
+ 
+              <!-- CTA button -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+                     style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a class="cta-btn" href="${shopUrl}/shop"
+                       style="display:inline-block;
+                              background:linear-gradient(135deg,#F5A623,#C47F11);
+                              color:#0D1B3E;text-decoration:none;
+                              padding:15px 44px;border-radius:50px;
+                              font-size:15px;font-weight:800;letter-spacing:0.3px;
+                              mso-padding-alt:0;line-height:normal;">
+                      <!--[if mso]><i style="letter-spacing:44px;mso-font-width:-100%;mso-text-raise:30pt">&nbsp;</i><![endif]-->
+                      🛍️ Shop Now &amp; Save
+                      <!--[if mso]><i style="letter-spacing:44px;mso-font-width:-100%">&nbsp;</i><![endif]-->
+                    </a>
+                  </td>
+                </tr>
+              </table>
+ 
+              <!-- Trust badges -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+                     style="margin-bottom:32px;border:1px solid #F0E8D8;
+                            border-radius:14px;overflow:hidden;">
+                <tr>
+                  <td class="trust-cell" width="33%" align="center"
+                      style="padding:16px 8px;vertical-align:top;
+                             border-right:1px solid #F0E8D8;">
+                    <p class="trust-icon"
+                       style="margin:0 0 7px;font-size:26px;line-height:1;">🚚</p>
+                    <p class="trust-title"
+                       style="margin:0 0 3px;font-size:11px;font-weight:700;
+                              color:#0D1B3E;">
+                      Free Delivery
+                    </p>
+                    <p class="trust-sub"
+                       style="margin:0;font-size:10px;color:#6B7A99;">
+                      On orders over ৳1000
+                    </p>
+                  </td>
+ 
+                  <td class="trust-cell" width="33%" align="center"
+                      style="padding:16px 8px;vertical-align:top;
+                             border-right:1px solid #F0E8D8;">
+                    <p class="trust-icon"
+                       style="margin:0 0 7px;font-size:26px;line-height:1;">🛡️</p>
+                    <p class="trust-title"
+                       style="margin:0 0 3px;font-size:11px;font-weight:700;
+                              color:#0D1B3E;">
+                      Secure Payment
+                    </p>
+                    <p class="trust-sub"
+                       style="margin:0;font-size:10px;color:#6B7A99;">
+                      100% Protected
+                    </p>
+                  </td>
+ 
+                  <td class="trust-cell" width="33%" align="center"
+                      style="padding:16px 8px;vertical-align:top;">
+                    <p class="trust-icon"
+                       style="margin:0 0 7px;font-size:26px;line-height:1;">↩️</p>
+                    <p class="trust-title"
+                       style="margin:0 0 3px;font-size:11px;font-weight:700;
+                              color:#0D1B3E;">
+                      Easy Returns
+                    </p>
+                    <p class="trust-sub"
+                       style="margin:0;font-size:10px;color:#6B7A99;">
+                      7 days hassle-free
+                    </p>
+                  </td>
+                </tr>
+              </table>
+ 
+            </td>
+          </tr>
+          <!-- ══════════════ END BODY ══════════════ -->
+ 
+          <!-- ══════════════ FOOTER ══════════════ -->
+          <tr>
+            <td>
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+                     style="background:#0D1B3E;border-radius:0 0 24px 24px;">
+                <tr>
+                  <td class="footer-pad"
+                      style="padding:30px 36px;text-align:center;">
+ 
+                    <!-- Social links -->
+                    <table cellpadding="0" cellspacing="0" role="presentation"
+                           style="margin:0 auto 18px;">
+                      <tr>
+                        <td style="padding:0 4px;">
+                          <a href="#"
+                             style="display:inline-block;
+                                    background:rgba(255,255,255,0.08);
+                                    border:1px solid rgba(255,255,255,0.12);
+                                    color:rgba(255,255,255,0.6);text-decoration:none;
+                                    padding:6px 14px;border-radius:20px;font-size:12px;">
+                            Facebook
+                          </a>
+                        </td>
+                        <td style="padding:0 4px;">
+                          <a href="#"
+                             style="display:inline-block;
+                                    background:rgba(255,255,255,0.08);
+                                    border:1px solid rgba(255,255,255,0.12);
+                                    color:rgba(255,255,255,0.6);text-decoration:none;
+                                    padding:6px 14px;border-radius:20px;font-size:12px;">
+                            WhatsApp
+                          </a>
+                        </td>
+                        <td style="padding:0 4px;">
+                          <a href="#"
+                             style="display:inline-block;
+                                    background:rgba(255,255,255,0.08);
+                                    border:1px solid rgba(255,255,255,0.12);
+                                    color:rgba(255,255,255,0.6);text-decoration:none;
+                                    padding:6px 14px;border-radius:20px;font-size:12px;">
+                            Instagram
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+ 
+                    <!-- Tagline -->
+                    <p style="margin:0 0 8px;font-size:13px;
+                              color:rgba(255,255,255,0.45);line-height:1.6;">
+                      🌾 BeeHarvest — সরাসরি ফার্ম থেকে আপনার দরজায়
+                    </p>
+ 
+                    <!-- Support email -->
+                    <p style="margin:0 0 10px;font-size:12px;
+                              color:rgba(255,255,255,0.3);">
+                      সাহায্যের জন্য:
+                      <a href="mailto:support@beeharvest.com.bd"
+                         style="color:#FDD882;text-decoration:none;">
+                        support@beeharvest.com.bd
+                      </a>
+                    </p>
+ 
+                    <!-- Copyright -->
+                    <p style="margin:0 0 10px;font-size:11px;
+                              color:rgba(255,255,255,0.18);">
+                      &copy; ${year} BeeHarvest. সর্বস্বত্ব সংরক্ষিত।
+                    </p>
+ 
+                    <!-- Unsubscribe notice -->
+                    <p style="margin:0;font-size:10px;color:rgba(255,255,255,0.12);">
+                      You&rsquo;re receiving this because you&rsquo;ve shopped with BeeHarvest.
+                      &nbsp;|&nbsp;
+                      <a href="${shopUrl}/unsubscribe"
+                         style="color:rgba(255,255,255,0.2);text-decoration:underline;">
+                        Unsubscribe
+                      </a>
+                    </p>
+ 
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- ══════════════ END FOOTER ══════════════ -->
+ 
+          <!-- Bottom spacer -->
+          <tr><td style="height:28px;"></td></tr>
+ 
+        </table>
+        <!-- End container -->
+ 
+      </td>
+    </tr>
+  </table>
+  <!-- End outer wrapper -->
+ 
 </body>
 </html>`;
 };
