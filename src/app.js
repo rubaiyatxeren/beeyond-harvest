@@ -14,6 +14,7 @@ const bannerRoutes = require("./routes/bannerRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const deliveryChargeRoutes = require("./routes/deliveryChargeRoutes");
+const couponRoutes = require("./routes/couponRoutes");
 
 const app = express();
 
@@ -118,6 +119,7 @@ app.use("/api/banners", bannerRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/delivery-charges", deliveryChargeRoutes);
+app.use("/api/coupons", couponRoutes);
 
 // ✅ DEBUG ROUTE LIST
 console.log("✅ Routes registered:");
