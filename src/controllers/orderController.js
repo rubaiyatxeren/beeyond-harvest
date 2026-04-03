@@ -38,28 +38,32 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
 
   const sc = statusConfig[order.orderStatus] || statusConfig.pending;
 
+  // ── Items — pure table, no flex ──────────────────────────────
   const itemsHtml = order.items
     .map(
       (item) => `
     <tr>
       <td style="padding:14px 16px;border-bottom:1px solid #F0E8D8;vertical-align:middle;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:44px;height:44px;background:linear-gradient(135deg,#FEF3CD,#FDD882);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">🛒</div>
-          <div>
-            <div style="font-weight:700;color:#0D1B3E;font-size:14px;line-height:1.3;">${item.name}</div>
-            <div style="color:#6B7A99;font-size:12px;margin-top:2px;">SKU: ${item.sku || "N/A"}</div>
-          </div>
-        </div>
+        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+          <tr>
+            <td style="width:44px;height:44px;min-width:44px;background:linear-gradient(135deg,#FEF3CD,#FDD882);border-radius:10px;text-align:center;vertical-align:middle;font-size:20px;line-height:44px;">🛒</td>
+            <td style="padding-left:12px;vertical-align:middle;">
+              <div style="font-weight:700;color:#0D1B3E;font-size:14px;line-height:1.4;margin:0;">${item.name}</div>
+              <div style="color:#6B7A99;font-size:12px;margin:3px 0 0;">SKU: ${item.sku || "N/A"}</div>
+            </td>
+          </tr>
+        </table>
       </td>
       <td style="padding:14px 16px;border-bottom:1px solid #F0E8D8;text-align:center;vertical-align:middle;">
-        <span style="background:#F5F7FA;color:#0D1B3E;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;">${item.quantity}</span>
+        <span style="background:#F5F7FA;color:#0D1B3E;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;display:inline-block;">${item.quantity}</span>
       </td>
-      <td style="padding:14px 16px;border-bottom:1px solid #F0E8D8;text-align:right;vertical-align:middle;color:#6B7A99;font-size:13px;">${item.price.toLocaleString()} ৳</td>
-      <td style="padding:14px 16px;border-bottom:1px solid #F0E8D8;text-align:right;vertical-align:middle;font-weight:700;color:#0D1B3E;font-size:14px;">${item.total.toLocaleString()} ৳</td>
+      <td style="padding:14px 16px;border-bottom:1px solid #F0E8D8;text-align:right;vertical-align:middle;color:#6B7A99;font-size:13px;white-space:nowrap;">${item.price.toLocaleString()} ৳</td>
+      <td style="padding:14px 16px;border-bottom:1px solid #F0E8D8;text-align:right;vertical-align:middle;font-weight:700;color:#0D1B3E;font-size:14px;white-space:nowrap;">${item.total.toLocaleString()} ৳</td>
     </tr>`,
     )
     .join("");
 
+  // ── Timeline — fixed table layout, connector via border trick ─
   const timelineSteps = [
     { key: "pending", icon: "📋", label: "অর্ডার গ্রহণ" },
     { key: "confirmed", icon: "✅", label: "নিশ্চিত" },
@@ -79,42 +83,83 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
 
   const timelineHtml =
     order.orderStatus === "cancelled"
-      ? `<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:16px 20px;display:flex;align-items:center;gap:12px;">
-        <span style="font-size:24px;">❌</span>
-        <div>
-          <div style="font-weight:700;color:#DC2626;font-size:14px;">অর্ডারটি বাতিল করা হয়েছে</div>
-          <div style="color:#6B7280;font-size:13px;margin-top:2px;">কোনো প্রশ্নের জন্য আমাদের সাথে যোগাযোগ করুন</div>
-        </div>
-      </div>`
-      : `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+      ? `<table width="100%" cellpadding="0" cellspacing="0">
         <tr>
-          ${timelineSteps
-            .map((step, i) => {
-              const done = i < currentIdx;
-              const active = i === currentIdx;
-              const dotBg = done ? "#10B981" : active ? "#F5A623" : "#E5E7EB";
-              const dotColor = done || active ? "white" : "#9CA3AF";
-              const labelColor = done
-                ? "#10B981"
-                : active
-                  ? "#F5A623"
-                  : "#9CA3AF";
-              const weight = active ? "700" : "500";
-              return `<td style="text-align:center;vertical-align:top;padding:0 4px;">
-              <div style="width:40px;height:40px;background:${dotBg};border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;font-size:16px;color:${dotColor};font-weight:700;${active ? "box-shadow:0 0 0 4px rgba(245,166,35,0.2);" : ""}">${step.icon}</div>
-              <div style="font-size:10px;color:${labelColor};font-weight:${weight};line-height:1.3;">${step.label}</div>
-            </td>
-            ${i < timelineSteps.length - 1 ? `<td style="padding-top:20px;"><div style="height:2px;background:${done ? "#10B981" : "#E5E7EB"};margin:0 -2px;"></div></td>` : ""}`;
-            })
-            .join("")}
+          <td style="background:#FEF2F2;border:1.5px solid #FECACA;border-radius:12px;padding:18px 20px;">
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:26px;vertical-align:middle;padding-right:14px;line-height:1;">❌</td>
+                <td style="vertical-align:middle;">
+                  <div style="font-weight:700;color:#DC2626;font-size:14px;margin:0 0 4px;">অর্ডারটি বাতিল করা হয়েছে</div>
+                  <div style="color:#6B7280;font-size:13px;margin:0;">কোনো প্রশ্নের জন্য আমাদের সাথে যোগাযোগ করুন</div>
+                </td>
+              </tr>
+            </table>
+          </td>
         </tr>
-      </table>`;
+      </table>`
+      : (() => {
+          // Build each step cell + connector cell
+          let cells = "";
+          timelineSteps.forEach((step, i) => {
+            const done = i < currentIdx;
+            const active = i === currentIdx;
+
+            const dotBg = done ? "#10B981" : active ? "#F5A623" : "#E8EBF4";
+            const ringStyle = active
+              ? "border:3px solid #F5A623;box-shadow:0 0 0 4px rgba(245,166,35,0.18);"
+              : done
+                ? "border:3px solid #10B981;"
+                : "border:3px solid #E8EBF4;";
+            const iconColor = done || active ? "#ffffff" : "#9CA3AF";
+            const labelColor = done
+              ? "#10B981"
+              : active
+                ? "#C47F11"
+                : "#9CA3AF";
+            const labelWeight = active ? "700" : "500";
+            const connColor = done ? "#10B981" : "#E8EBF4";
+
+            // Step cell
+            cells += `<td style="text-align:center;vertical-align:top;padding:0 2px;width:${Math.floor(100 / timelineSteps.length)}%;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td align="center" style="padding-bottom:8px;">
+                  <table cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                    <tr>
+                      <td style="width:44px;height:44px;background:${dotBg};${ringStyle}border-radius:50%;text-align:center;vertical-align:middle;font-size:18px;line-height:44px;color:${iconColor};">
+                        ${step.icon}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td align="center">
+                  <div style="font-size:10px;color:${labelColor};font-weight:${labelWeight};line-height:1.4;text-align:center;">${step.label}</div>
+                </td>
+              </tr>
+            </table>
+          </td>`;
+
+            // Connector cell between steps
+            if (i < timelineSteps.length - 1) {
+              cells += `<td style="vertical-align:top;padding:0;padding-top:22px;width:20px;">
+              <div style="height:3px;background:${connColor};border-radius:2px;margin:0 2px;"></div>
+            </td>`;
+            }
+          });
+
+          return `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;table-layout:fixed;">
+          <tr>${cells}</tr>
+        </table>`;
+        })();
 
   const greeting = isNewOrder
-    ? `আপনার অর্ডার নিশ্চিত হয়েছে!`
-    : `আপনার অর্ডারের আপডেট`;
+    ? "আপনার অর্ডার নিশ্চিত হয়েছে!"
+    : "আপনার অর্ডারের আপডেট";
   const subGreeting = isNewOrder
-    ? `আমরা আপনার অর্ডারটি পেয়েছি এবং শীঘ্রই প্রক্রিয়া শুরু করব।`
+    ? "আমরা আপনার অর্ডারটি পেয়েছি এবং শীঘ্রই প্রক্রিয়া শুরু করব।"
     : `আপনার অর্ডার <strong>${sc.icon} ${sc.label}</strong> স্ট্যাটাসে আপডেট হয়েছে।`;
 
   return `<!DOCTYPE html>
@@ -126,7 +171,6 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
 </head>
 <body style="margin:0;padding:0;background:#F5F0E8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
 
-<!-- Preheader -->
 <div style="display:none;max-height:0;overflow:hidden;">${isNewOrder ? "আপনার অর্ডার নিশ্চিত হয়েছে" : "অর্ডার স্ট্যাটাস আপডেট"} — ${order.orderNumber}</div>
 
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;padding:24px 16px;">
@@ -141,28 +185,26 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
           <!-- Logo -->
           <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
             <tr>
-              <td style="background:linear-gradient(135deg,#F5A623,#C47F11);border-radius:14px;width:52px;height:52px;text-align:center;vertical-align:middle;font-size:26px;">🐝</td>
+              <td style="background:linear-gradient(135deg,#F5A623,#C47F11);border-radius:14px;width:52px;height:52px;text-align:center;vertical-align:middle;font-size:26px;line-height:52px;">🐝</td>
               <td style="padding-left:12px;text-align:left;vertical-align:middle;">
                 <div style="font-size:22px;font-weight:800;color:white;letter-spacing:0.5px;">BeeHarvest</div>
-                <div style="font-size:11px;color:#FDD882;margin-top:1px;">বাংলাদেশের বিশ্বস্ত অনলাইন শপ</div>
+                <div style="font-size:11px;color:#FDD882;margin-top:2px;">বাংলাদেশের বিশ্বস্ত অনলাইন শপ</div>
               </td>
             </tr>
           </table>
 
-          <!-- Hero badge -->
+          <!-- Badge -->
           <div style="display:inline-block;background:rgba(245,166,35,0.15);border:1px solid rgba(245,166,35,0.35);border-radius:50px;padding:6px 20px;margin-bottom:20px;">
             <span style="color:#FDD882;font-size:12px;font-weight:600;letter-spacing:0.5px;">${isNewOrder ? "✨ নতুন অর্ডার কনফার্মেশন" : "📦 অর্ডার স্ট্যাটাস আপডেট"}</span>
           </div>
 
-          <!-- Main heading -->
-          <h1 style="margin:0 0 10px;color:white;font-size:28px;font-weight:800;line-height:1.2;">${greeting}</h1>
+          <h1 style="margin:0 0 10px;color:white;font-size:26px;font-weight:800;line-height:1.25;">${greeting}</h1>
           <p style="margin:0 0 32px;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.6;">${subGreeting}</p>
         </td>
       </tr>
-
-      <!-- Honeycomb wave divider -->
+      <!-- Wave divider -->
       <tr>
-        <td style="line-height:0;">
+        <td style="line-height:0;font-size:0;">
           <svg width="100%" height="40" viewBox="0 0 600 40" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M0,0 C150,40 450,0 600,40 L600,40 L0,40 Z" fill="#FFF9F0"/>
           </svg>
@@ -172,27 +214,28 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
   </td></tr>
 
   <!-- ══ BODY ══ -->
-  <tr><td style="background:#FFF9F0;padding:0 40px;">
+  <tr><td style="background:#FFF9F0;padding:0 32px;">
 
-    <!-- Hi greeting -->
+    <!-- Greeting -->
     <div style="padding:28px 0 0;">
-      <p style="margin:0 0 24px;font-size:16px;color:#0D1B3E;line-height:1.6;">
-        নমস্কার <strong style="color:#F5A623;">${order.customer.name}</strong> ভাই/আপু! 👋
+      <p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.7;">
+        প্রিয় <strong style="color:#0D1B3E;">${order.customer.name}</strong>, আপনাকে স্বাগতম! 🌟<br/>
+        <span style="font-size:14px;color:#6B7A99;">আপনার অর্ডারটি সফলভাবে গৃহীত হয়েছে। নিচে বিস্তারিত তথ্য দেওয়া হলো।</span>
       </p>
     </div>
 
     <!-- Order number strip -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:16px;margin-bottom:24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:16px;margin-bottom:20px;">
       <tr>
-        <td style="padding:20px 24px;">
+        <td style="padding:18px 22px;">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td>
-                <div style="font-size:11px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">অর্ডার নম্বর</div>
-                <div style="font-size:20px;font-weight:800;color:#FDD882;letter-spacing:1px;font-family:monospace;">${order.orderNumber}</div>
+              <td style="vertical-align:middle;">
+                <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:5px;">অর্ডার নম্বর</div>
+                <div style="font-size:19px;font-weight:800;color:#FDD882;letter-spacing:1px;font-family:'Courier New',monospace;">${order.orderNumber}</div>
               </td>
-              <td align="right">
-                <div style="background:${sc.bg};color:${sc.color};padding:8px 16px;border-radius:50px;font-size:12px;font-weight:700;white-space:nowrap;">${sc.icon} ${sc.label}</div>
+              <td align="right" style="vertical-align:middle;">
+                <div style="background:${sc.bg};color:${sc.color};padding:8px 16px;border-radius:50px;font-size:12px;font-weight:700;white-space:nowrap;display:inline-block;">${sc.icon} ${sc.label}</div>
               </td>
             </tr>
           </table>
@@ -200,33 +243,33 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
       </tr>
     </table>
 
-    <!-- Order details grid -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;border-radius:16px;margin-bottom:24px;">
+    <!-- Details grid -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;border-radius:16px;margin-bottom:20px;">
       <tr>
-        <td style="padding:20px 24px;">
-          <div style="font-size:13px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;">📋 অর্ডারের বিবরণ</div>
+        <td style="padding:18px 22px;">
+          <div style="font-size:12px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:16px;">📋 অর্ডারের বিবরণ</div>
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td width="50%" style="padding-bottom:14px;vertical-align:top;">
-                <div style="font-size:11px;color:#6B7A99;margin-bottom:3px;">তারিখ ও সময়</div>
+              <td width="50%" style="padding-bottom:12px;vertical-align:top;">
+                <div style="font-size:10px;color:#6B7A99;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px;">তারিখ</div>
                 <div style="font-size:13px;font-weight:600;color:#0D1B3E;">${new Date(order.createdAt).toLocaleDateString("bn-BD", { year: "numeric", month: "long", day: "numeric" })}</div>
               </td>
-              <td width="50%" style="padding-bottom:14px;vertical-align:top;">
-                <div style="font-size:11px;color:#6B7A99;margin-bottom:3px;">পেমেন্ট পদ্ধতি</div>
+              <td width="50%" style="padding-bottom:12px;vertical-align:top;">
+                <div style="font-size:10px;color:#6B7A99;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px;">পেমেন্ট পদ্ধতি</div>
                 <div style="font-size:13px;font-weight:600;color:#0D1B3E;">${order.paymentMethod === "cash_on_delivery" ? "💵 ক্যাশ অন ডেলিভারি" : order.paymentMethod}</div>
               </td>
             </tr>
             <tr>
               <td width="50%" style="vertical-align:top;">
-                <div style="font-size:11px;color:#6B7A99;margin-bottom:3px;">পেমেন্ট স্ট্যাটাস</div>
+                <div style="font-size:10px;color:#6B7A99;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px;">পেমেন্ট স্ট্যাটাস</div>
                 <div style="font-size:13px;font-weight:600;color:${order.paymentStatus === "paid" ? "#10B981" : "#F59E0B"};">${order.paymentStatus === "paid" ? "✅ পরিশোধিত" : "⏳ অপেক্ষমাণ"}</div>
               </td>
               ${
                 order.trackingNumber
                   ? `<td width="50%" style="vertical-align:top;">
-                <div style="font-size:11px;color:#6B7A99;margin-bottom:3px;">ট্র্যাকিং নম্বর</div>
-                <div style="font-size:13px;font-weight:700;color:#F5A623;font-family:monospace;">${order.trackingNumber}</div>
-              </td>`
+                    <div style="font-size:10px;color:#6B7A99;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px;">ট্র্যাকিং নম্বর</div>
+                    <div style="font-size:13px;font-weight:700;color:#F5A623;font-family:'Courier New',monospace;">${order.trackingNumber}</div>
+                  </td>`
                   : `<td width="50%"></td>`
               }
             </tr>
@@ -236,99 +279,102 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
     </table>
 
     <!-- Delivery address -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;border-radius:16px;margin-bottom:24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;border-radius:16px;margin-bottom:20px;">
       <tr>
-        <td style="padding:20px 24px;">
-          <div style="font-size:13px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">📍 ডেলিভারি ঠিকানা</div>
-          <div style="font-size:14px;color:#374151;line-height:1.8;">
-            <strong style="color:#0D1B3E;">${order.customer.name}</strong><br/>
-            ${order.customer.phone}<br/>
-            ${order.customer.address?.street ? order.customer.address.street + "<br/>" : ""}
-            ${order.customer.address?.area ? order.customer.address.area + ", " : ""}${order.customer.address?.city || ""}
-          </div>
+        <td style="padding:18px 22px;">
+          <div style="font-size:12px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:12px;">📍 ডেলিভারি ঠিকানা</div>
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="font-size:14px;color:#374151;line-height:1.9;">
+                <strong style="color:#0D1B3E;">${order.customer.name}</strong><br/>
+                📞 ${order.customer.phone}<br/>
+                ${order.customer.address?.street ? `🏠 ${order.customer.address.street}<br/>` : ""}
+                📌 ${[order.customer.address?.area, order.customer.address?.city].filter(Boolean).join(", ") || "N/A"}
+              </td>
+            </tr>
+          </table>
         </td>
       </tr>
     </table>
 
-    <!-- Order Status Timeline -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;border-radius:16px;margin-bottom:24px;">
+    <!-- ── TIMELINE (fully table-based, no flex) ── -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;border-radius:16px;margin-bottom:20px;">
       <tr>
-        <td style="padding:20px 24px;">
-          <div style="font-size:13px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:20px;">🚀 অর্ডার যাত্রা</div>
+        <td style="padding:18px 22px 22px;">
+          <div style="font-size:12px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:20px;">🚀 অর্ডার যাত্রা</div>
           ${timelineHtml}
         </td>
       </tr>
     </table>
 
     <!-- Items table -->
-    <div style="margin-bottom:8px;">
-      <div style="font-size:13px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">🛍️ অর্ডারকৃত পণ্যসমূহ</div>
-    </div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:16px;overflow:hidden;margin-bottom:24px;border:1px solid #F0E8D8;">
+    <div style="font-size:12px;font-weight:700;color:#0D1B3E;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:12px;">🛍️ অর্ডারকৃত পণ্যসমূহ</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:16px;overflow:hidden;margin-bottom:20px;border:1px solid #F0E8D8;">
       <thead>
         <tr style="background:#0D1B3E;">
-          <th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.5px;">পণ্য</th>
-          <th style="padding:12px 16px;text-align:center;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.5px;">পরিমাণ</th>
-          <th style="padding:12px 16px;text-align:right;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.5px;">একক মূল্য</th>
-          <th style="padding:12px 16px;text-align:right;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.5px;">মোট</th>
+          <th style="padding:12px 16px;text-align:left;font-size:10px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.8px;">পণ্য</th>
+          <th style="padding:12px 16px;text-align:center;font-size:10px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.8px;">পরিমাণ</th>
+          <th style="padding:12px 16px;text-align:right;font-size:10px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.8px;">একক মূল্য</th>
+          <th style="padding:12px 16px;text-align:right;font-size:10px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.8px;">মোট</th>
         </tr>
       </thead>
-      <tbody style="background:white;">
-        ${itemsHtml}
-      </tbody>
+      <tbody style="background:white;">${itemsHtml}</tbody>
     </table>
 
     <!-- Totals -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:16px;margin-bottom:28px;">
-      <tr><td style="padding:24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0D1B3E,#1A2E5A);border-radius:16px;margin-bottom:24px;">
+      <tr><td style="padding:22px 24px;">
         <table width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td style="padding:6px 0;color:rgba(255,255,255,0.65);font-size:14px;">পণ্যের মূল্য</td>
-            <td style="padding:6px 0;text-align:right;color:rgba(255,255,255,0.65);font-size:14px;">${order.subtotal.toLocaleString()} ৳</td>
+            <td style="padding:5px 0;color:rgba(255,255,255,0.6);font-size:13px;">পণ্যের মূল্য</td>
+            <td style="padding:5px 0;text-align:right;color:rgba(255,255,255,0.6);font-size:13px;">${order.subtotal.toLocaleString()} ৳</td>
           </tr>
           <tr>
-            <td style="padding:6px 0;color:rgba(255,255,255,0.65);font-size:14px;">ডেলিভারি চার্জ</td>
-            <td style="padding:6px 0;text-align:right;color:rgba(255,255,255,0.65);font-size:14px;">${order.deliveryCharge.toLocaleString()} ৳</td>
+            <td style="padding:5px 0;color:rgba(255,255,255,0.6);font-size:13px;">ডেলিভারি চার্জ</td>
+            <td style="padding:5px 0;text-align:right;color:rgba(255,255,255,0.6);font-size:13px;">${order.deliveryCharge.toLocaleString()} ৳</td>
           </tr>
           <tr>
-            <td colspan="2" style="padding:2px 0;">
-              <div style="height:1px;background:rgba(255,255,255,0.15);margin:8px 0;"></div>
-            </td>
+            <td colspan="2"><div style="height:1px;background:rgba(255,255,255,0.15);margin:10px 0;"></div></td>
           </tr>
           <tr>
-            <td style="padding:6px 0;color:white;font-size:18px;font-weight:800;">মোট প্রদেয়</td>
-            <td style="padding:6px 0;text-align:right;color:#FDD882;font-size:22px;font-weight:800;">${order.total.toLocaleString()} ৳</td>
+            <td style="color:white;font-size:17px;font-weight:800;">মোট প্রদেয়</td>
+            <td style="text-align:right;color:#FDD882;font-size:22px;font-weight:800;">${order.total.toLocaleString()} ৳</td>
           </tr>
         </table>
       </td></tr>
     </table>
 
-    <!-- CTA Button -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+    <!-- CTA -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
       <tr>
         <td align="center">
-          <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}" style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:16px 40px;border-radius:50px;font-size:15px;font-weight:800;letter-spacing:0.3px;">🔍 অর্ডার ট্র্যাক করুন</a>
+          <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}"
+            style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:800;letter-spacing:0.3px;">
+            🔍 অর্ডার ট্র্যাক করুন
+          </a>
         </td>
       </tr>
     </table>
 
-    <!-- Trust badges -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+    <!-- Trust badges — table-only, no flex -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;border:1px solid #F0E8D8;border-radius:14px;overflow:hidden;">
       <tr>
-        <td width="33%" align="center" style="padding:12px 8px;">
-          <div style="font-size:24px;margin-bottom:6px;">🚚</div>
-          <div style="font-size:11px;font-weight:700;color:#0D1B3E;">দ্রুত ডেলিভারি</div>
-          <div style="font-size:10px;color:#6B7A99;margin-top:2px;">১–২ কার্যদিবস</div>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🚚</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">দ্রুত ডেলিভারি</div>
+          <div style="font-size:10px;color:#6B7A99;">১–২ কার্যদিবস</div>
         </td>
-        <td width="33%" align="center" style="padding:12px 8px;border-left:1px solid #F0E8D8;border-right:1px solid #F0E8D8;">
-          <div style="font-size:24px;margin-bottom:6px;">🛡️</div>
-          <div style="font-size:11px;font-weight:700;color:#0D1B3E;">নিরাপদ পেমেন্ট</div>
-          <div style="font-size:10px;color:#6B7A99;margin-top:2px;">১০০% সুরক্ষিত</div>
+        <td width="1" style="background:#F0E8D8;padding:0;"></td>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">🛡️</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">নিরাপদ পেমেন্ট</div>
+          <div style="font-size:10px;color:#6B7A99;">১০০% সুরক্ষিত</div>
         </td>
-        <td width="33%" align="center" style="padding:12px 8px;">
-          <div style="font-size:24px;margin-bottom:6px;">↩️</div>
-          <div style="font-size:11px;font-weight:700;color:#0D1B3E;">৭ দিনের রিটার্ন</div>
-          <div style="font-size:10px;color:#6B7A99;margin-top:2px;">ঝামেলামুক্ত</div>
+        <td width="1" style="background:#F0E8D8;padding:0;"></td>
+        <td width="33%" align="center" style="padding:16px 8px;vertical-align:top;">
+          <div style="font-size:26px;line-height:1;margin-bottom:7px;">↩️</div>
+          <div style="font-size:11px;font-weight:700;color:#0D1B3E;margin-bottom:3px;">৭ দিনের রিটার্ন</div>
+          <div style="font-size:10px;color:#6B7A99;">ঝামেলামুক্ত</div>
         </td>
       </tr>
     </table>
@@ -339,25 +385,20 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
   <tr><td>
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#0D1B3E;border-radius:0 0 24px 24px;">
       <tr>
-        <td style="padding:32px 40px;text-align:center;">
+        <td style="padding:30px 32px;text-align:center;">
           <div style="margin-bottom:16px;">
-            <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 4px;">Facebook</a>
-            <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 4px;">WhatsApp</a>
-            <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 4px;">Instagram</a>
+            <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Facebook</a>
+            <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">WhatsApp</a>
+            <a href="#" style="display:inline-block;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);text-decoration:none;padding:6px 14px;border-radius:20px;font-size:12px;margin:0 3px;">Instagram</a>
           </div>
-          <p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;">
-            🌾 BeeHarvest — সরাসরি ফার্ম থেকে আপনার দরজায়
-          </p>
-          <p style="margin:0 0 12px;font-size:12px;color:rgba(255,255,255,0.35);">
-            সাহায্যের জন্য: <a href="mailto:support@beeharvest.com.bd" style="color:#FDD882;text-decoration:none;">support@beeharvest.com.bd</a>
-          </p>
-          <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.25);">© ${new Date().getFullYear()} BeeHarvest. সর্বস্বত্ব সংরক্ষিত।</p>
+          <p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;">🌾 BeeHarvest — সরাসরি ফার্ম থেকে আপনার দরজায়</p>
+          <p style="margin:0 0 10px;font-size:12px;color:rgba(255,255,255,0.35);">সাহায্যের জন্য: <a href="mailto:support@beeharvest.com.bd" style="color:#FDD882;text-decoration:none;">support@beeharvest.com.bd</a></p>
+          <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);">© ${new Date().getFullYear()} BeeHarvest. সর্বস্বত্ব সংরক্ষিত।</p>
         </td>
       </tr>
     </table>
   </td></tr>
 
-  <!-- Bottom spacer -->
   <tr><td style="height:24px;"></td></tr>
 
 </table>
@@ -602,8 +643,6 @@ const generateAdminEmailTemplate = (order, type = "new_order") => {
 </body>
 </html>`;
 };
-
-// module.exports = { generateOrderEmailTemplate, generateAdminEmailTemplate };
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 
