@@ -1,41 +1,104 @@
 const dotenv = require("dotenv");
 dotenv.config();
 
+// ✅ MUST be first — before anything else loads
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught Exception:", err.message, err.stack);
+
+  // Only shutdown on truly fatal errors
+  const isFatal =
+    err.code === "ERR_USE_AFTER_FREE" ||
+    err.code === "ENOMEM" ||
+    err?.name === "MongoNetworkError" ||
+    err?.name === "MongooseServerSelectionError";
+
+  if (isFatal) {
+    console.error("❌ Fatal — shutting down...");
+    shutdown("UNCAUGHT_EXCEPTION");
+  }
+  // Non-fatal: log only, keep running
+});
+
+process.on("unhandledRejection", (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  console.error("❌ Unhandled Rejection:", err.message, err.stack);
+
+  // Only shutdown on DB errors — everything else: log and continue
+  const isDbError =
+    err?.name === "MongoNetworkError" ||
+    err?.name === "MongooseServerSelectionError" ||
+    err?.code === "ECONNRESET";
+
+  if (isDbError) {
+    console.error("❌ DB error → restarting...");
+    shutdown("UNHANDLED_REJECTION");
+  }
+});
+
 const app = require("./src/app");
 const connectDB = require("./src/config/database");
 const Admin = require("./src/models/Admin");
 const mongoose = require("mongoose");
 
 const PORT = process.env.PORT || 5000;
+const TIME_OUT_MS = 25000;
+
 let server;
+let memoryMonitor;
 
 // ==============================
-// ⏱️ GLOBAL TIMEOUT PROTECTION
+// ✅ GRACEFUL SHUTDOWN
 // ==============================
-const TIME_OUT_MS = 25000; // 25 seconds
+const shutdown = async (signal) => {
+  if (shutdown.shuttingDown) return;
+  shutdown.shuttingDown = true;
 
-// Add timeout middleware to app
+  console.log(`⚠️ Shutdown: ${signal}`);
+
+  // Stop memory monitor so it doesn't keep process alive
+  if (memoryMonitor) clearInterval(memoryMonitor);
+
+  const forceExit = setTimeout(() => {
+    console.error("⚠️ Force exit after timeout");
+    process.exit(1);
+  }, 10000);
+
+  try {
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+      console.log("✅ HTTP server closed");
+    }
+    if (mongoose.connection.readyState === 1) {
+      await mongoose.connection.close();
+      console.log("✅ MongoDB closed");
+    }
+    clearTimeout(forceExit);
+    process.exit(signal === "SIGINT" || signal === "SIGTERM" ? 0 : 1);
+  } catch (err) {
+    console.error("❌ Shutdown error:", err.message);
+    clearTimeout(forceExit);
+    process.exit(1);
+  }
+};
+
+// ==============================
+// ✅ TIMEOUT MIDDLEWARE
+// Must be added to app before routes in app.js,
+// OR here before startServer if you control middleware order
+// ==============================
 app.use((req, res, next) => {
   req.setTimeout(TIME_OUT_MS, () => {
     console.error(`⏰ Request timeout: ${req.method} ${req.url}`);
     if (!res.headersSent) {
-      res.status(504).json({
-        success: false,
-        message: "Request timeout. Please try again.",
-      });
+      res.status(504).json({ success: false, message: "Request timeout." });
     }
   });
-
   res.setTimeout(TIME_OUT_MS, () => {
     console.error(`⏰ Response timeout: ${req.method} ${req.url}`);
     if (!res.headersSent) {
-      res.status(504).json({
-        success: false,
-        message: "Server timeout. Please try again.",
-      });
+      res.status(504).json({ success: false, message: "Server timeout." });
     }
   });
-
   next();
 });
 
@@ -48,9 +111,7 @@ const createDefaultAdmin = async () => {
       console.warn("⚠️ ADMIN_EMAIL or ADMIN_PASSWORD not set");
       return;
     }
-
     const exists = await Admin.findOne({ email: process.env.ADMIN_EMAIL });
-
     if (!exists) {
       await Admin.create({
         name: "Super Admin",
@@ -61,98 +122,62 @@ const createDefaultAdmin = async () => {
       });
       console.log("✅ Default admin created");
     } else {
-      console.log("✅ Default admin already exists");
+      console.log("✅ Admin already exists");
     }
   } catch (err) {
     console.error("❌ Admin creation failed:", err.message);
+    // Non-fatal — don't crash startup
   }
 };
 
 // ==============================
-// ✅ GRACEFUL SHUTDOWN (IMPROVED)
+// ✅ MEMORY MONITOR
 // ==============================
-const shutdown = async (signal) => {
-  console.log(`⚠️ Shutdown initiated: ${signal}`);
+const startMemoryMonitor = () => {
+  memoryMonitor = setInterval(() => {
+    const used = process.memoryUsage();
+    const rssMB = (used.rss / 1024 / 1024).toFixed(2);
+    const heapUsedMB = (used.heapUsed / 1024 / 1024).toFixed(2);
+    const heapTotalMB = (used.heapTotal / 1024 / 1024).toFixed(2);
 
-  // Prevent multiple shutdown attempts
-  if (shutdown.shuttingDown) return;
-  shutdown.shuttingDown = true;
-
-  // Force exit after 10 seconds
-  const forceExit = setTimeout(() => {
-    console.error("⚠️ Force exit after timeout");
-    process.exit(1);
-  }, 10000);
-
-  try {
-    if (server) {
-      await new Promise((resolve) => server.close(resolve));
-      console.log("✅ HTTP server closed");
+    if (rssMB > 400) {
+      console.warn(
+        `⚠️ High memory: RSS=${rssMB}MB Heap=${heapUsedMB}/${heapTotalMB}MB`,
+      );
     }
+  }, 30000);
 
-    if (mongoose.connection.readyState === 1) {
-      await mongoose.connection.close();
-      console.log("✅ MongoDB connection closed");
-    }
-
-    clearTimeout(forceExit);
-    process.exit(signal === "SIGINT" || signal === "SIGTERM" ? 0 : 1);
-  } catch (err) {
-    console.error("❌ Shutdown error:", err.message);
-    clearTimeout(forceExit);
-    process.exit(1);
-  }
+  // ✅ Unref so this timer doesn't prevent graceful shutdown
+  memoryMonitor.unref();
 };
-
-// ==============================
-// ✅ MEMORY USAGE MONITORING
-// ==============================
-setInterval(() => {
-  const used = process.memoryUsage();
-  const rssMB = (used.rss / 1024 / 1024).toFixed(2);
-  const heapUsedMB = (used.heapUsed / 1024 / 1024).toFixed(2);
-  const heapTotalMB = (used.heapTotal / 1024 / 1024).toFixed(2);
-
-  if (rssMB > 400) {
-    console.warn(
-      `⚠️ High memory usage: RSS=${rssMB} MB, Heap=${heapUsedMB}/${heapTotalMB} MB`,
-    );
-  } else if (process.env.NODE_ENV === "development") {
-    console.log(
-      `📊 Memory: RSS=${rssMB} MB, Heap=${heapUsedMB}/${heapTotalMB} MB`,
-    );
-  }
-}, 30000);
 
 // ==============================
 // ✅ START SERVER
 // ==============================
 const startServer = async () => {
   try {
-    // 🔥 Connect DB (must succeed)
     await connectDB();
 
     if (mongoose.connection.readyState !== 1) {
       throw new Error("Database not connected");
     }
-
     console.log("✅ MongoDB connected");
 
     await createDefaultAdmin();
 
-    // 🔥 Start server
     server = app.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Server running (${process.env.NODE_ENV || "dev"})`);
-      console.log(`🌐 Port: ${PORT}`);
-      console.log(`❤️ Health: /health`);
-      console.log(`⏱️ Request timeout: ${TIME_OUT_MS}ms`);
+      console.log(
+        `🚀 Server running on port ${PORT} (${process.env.NODE_ENV || "dev"})`,
+      );
+      console.log(`❤️  Health: /health`);
     });
 
-    // 🔥 Catch server-level errors
     server.on("error", (err) => {
       console.error("❌ Server error:", err.message);
       shutdown("SERVER_ERROR");
     });
+
+    startMemoryMonitor();
   } catch (err) {
     console.error("❌ Startup failed:", err.message);
     process.exit(1);
@@ -162,80 +187,23 @@ const startServer = async () => {
 startServer();
 
 // ==============================
-// 🔥 ERROR HANDLING (SMART)
+// ✅ RENDER SIGNALS
 // ==============================
-
-process.on("unhandledRejection", (err) => {
-  console.error("❌ Unhandled Rejection:", err.message, err.stack);
-
-  if (
-    err?.name === "MongoNetworkError" ||
-    err?.name === "MongooseServerSelectionError" ||
-    err?.code === "ECONNRESET"
-  ) {
-    console.error("❌ Critical DB error → restarting...");
-    shutdown("UNHANDLED_REJECTION");
-  }
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("❌ Uncaught Exception:", err.message, err.stack);
-
-  if (
-    err.code === "ERR_USE_AFTER_FREE" ||
-    err.code === "ENOMEM" ||
-    err?.name === "MongoNetworkError" ||
-    err?.name === "MongooseServerSelectionError"
-  ) {
-    console.error("❌ Fatal error → restarting...");
-    shutdown("UNCAUGHT_EXCEPTION");
-  }
-});
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 // ==============================
-// 🔥 RENDER SIGNALS
+// ✅ MONGOOSE EVENTS
 // ==============================
+mongoose.connection.on("connected", () => console.log("🟢 MongoDB connected"));
+mongoose.connection.on("error", (err) =>
+  console.error("🔴 MongoDB error:", err.message),
+);
+mongoose.connection.on("disconnected", () =>
+  console.warn("🟡 MongoDB disconnected — retrying..."),
+);
+mongoose.connection.on("reconnected", () =>
+  console.log("🟢 MongoDB reconnected"),
+);
 
-process.on("SIGTERM", () => {
-  console.log("👋 SIGTERM received");
-  shutdown("SIGTERM");
-});
-
-process.on("SIGINT", () => {
-  console.log("👋 SIGINT received");
-  shutdown("SIGINT");
-});
-
-// ==============================
-// 🔥 MONGOOSE EVENTS (STABLE)
-// ==============================
-
-mongoose.connection.on("connected", () => {
-  console.log("🟢 MongoDB connected");
-});
-
-mongoose.connection.on("error", (err) => {
-  console.error("🔴 MongoDB error:", err.message);
-});
-
-mongoose.connection.on("disconnected", () => {
-  console.warn("🟡 MongoDB disconnected — retrying...");
-});
-
-mongoose.connection.on("reconnected", () => {
-  console.log("🟢 MongoDB reconnected");
-});
-
-// ==============================
-// 🔥 PROCESS EVENTS
-// ==============================
-
-process.on("beforeExit", (code) => {
-  console.log(`📋 Process beforeExit with code: ${code}`);
-});
-
-process.on("exit", (code) => {
-  console.log(`📋 Process exit with code: ${code}`);
-});
-
-console.log("✅ Server initialization complete");
+process.on("exit", (code) => console.log(`📋 Process exit: ${code}`));
