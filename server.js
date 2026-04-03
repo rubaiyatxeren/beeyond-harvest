@@ -1,38 +1,20 @@
 const dotenv = require("dotenv");
 dotenv.config();
 
-// ✅ MUST be first — before anything else loads
+// ✅ NEVER shutdown on network/DB errors — mongoose auto-reconnects
 process.on("uncaughtException", (err) => {
-  console.error("❌ Uncaught Exception:", err.message, err.stack);
-
-  // Only shutdown on truly fatal errors
-  const isFatal =
-    err.code === "ERR_USE_AFTER_FREE" ||
-    err.code === "ENOMEM" ||
-    err?.name === "MongoNetworkError" ||
-    err?.name === "MongooseServerSelectionError";
-
-  if (isFatal) {
-    console.error("❌ Fatal — shutting down...");
-    shutdown("UNCAUGHT_EXCEPTION");
+  console.error("❌ Uncaught Exception:", err.message);
+  if (err.code === "ERR_USE_AFTER_FREE" || err.code === "ENOMEM") {
+    console.error("❌ Fatal OOM — shutting down");
+    process.exit(1);
   }
-  // Non-fatal: log only, keep running
+  // everything else: log and survive
 });
 
 process.on("unhandledRejection", (reason) => {
-  const err = reason instanceof Error ? reason : new Error(String(reason));
-  console.error("❌ Unhandled Rejection:", err.message, err.stack);
-
-  // Only shutdown on DB errors — everything else: log and continue
-  const isDbError =
-    err?.name === "MongoNetworkError" ||
-    err?.name === "MongooseServerSelectionError" ||
-    err?.code === "ECONNRESET";
-
-  if (isDbError) {
-    console.error("❌ DB error → restarting...");
-    shutdown("UNHANDLED_REJECTION");
-  }
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error("❌ Unhandled Rejection:", msg);
+  // ✅ NEVER call shutdown here — ECONNRESET, MongoNetworkError etc are recoverable
 });
 
 const app = require("./src/app");
@@ -46,71 +28,41 @@ const TIME_OUT_MS = 25000;
 let server;
 let memoryMonitor;
 
-// ==============================
-// ✅ GRACEFUL SHUTDOWN
-// ==============================
+// ─── Graceful shutdown (SIGTERM/SIGINT only) ──────────────────────────────────
 const shutdown = async (signal) => {
-  if (shutdown.shuttingDown) return;
-  shutdown.shuttingDown = true;
-
+  if (shutdown._busy) return;
+  shutdown._busy = true;
   console.log(`⚠️ Shutdown: ${signal}`);
-
-  // Stop memory monitor so it doesn't keep process alive
   if (memoryMonitor) clearInterval(memoryMonitor);
-
-  const forceExit = setTimeout(() => {
-    console.error("⚠️ Force exit after timeout");
-    process.exit(1);
-  }, 10000);
-
+  const force = setTimeout(() => process.exit(1), 10000);
   try {
-    if (server) {
-      await new Promise((resolve) => server.close(resolve));
-      console.log("✅ HTTP server closed");
-    }
-    if (mongoose.connection.readyState === 1) {
-      await mongoose.connection.close();
-      console.log("✅ MongoDB closed");
-    }
-    clearTimeout(forceExit);
-    process.exit(signal === "SIGINT" || signal === "SIGTERM" ? 0 : 1);
-  } catch (err) {
-    console.error("❌ Shutdown error:", err.message);
-    clearTimeout(forceExit);
-    process.exit(1);
-  }
+    if (server) await new Promise((r) => server.close(r));
+    if (mongoose.connection.readyState === 1) await mongoose.connection.close();
+  } catch {}
+  clearTimeout(force);
+  process.exit(0);
 };
 
-// ==============================
-// ✅ TIMEOUT MIDDLEWARE
-// Must be added to app before routes in app.js,
-// OR here before startServer if you control middleware order
-// ==============================
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+// ─── Timeout middleware ───────────────────────────────────────────────────────
 app.use((req, res, next) => {
   req.setTimeout(TIME_OUT_MS, () => {
-    console.error(`⏰ Request timeout: ${req.method} ${req.url}`);
-    if (!res.headersSent) {
+    if (!res.headersSent)
       res.status(504).json({ success: false, message: "Request timeout." });
-    }
   });
   res.setTimeout(TIME_OUT_MS, () => {
-    console.error(`⏰ Response timeout: ${req.method} ${req.url}`);
-    if (!res.headersSent) {
+    if (!res.headersSent)
       res.status(504).json({ success: false, message: "Server timeout." });
-    }
   });
   next();
 });
 
-// ==============================
-// ✅ CREATE DEFAULT ADMIN
-// ==============================
+// ─── Seed admin ───────────────────────────────────────────────────────────────
 const createDefaultAdmin = async () => {
   try {
-    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
-      console.warn("⚠️ ADMIN_EMAIL or ADMIN_PASSWORD not set");
-      return;
-    }
+    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) return;
     const exists = await Admin.findOne({ email: process.env.ADMIN_EMAIL });
     if (!exists) {
       await Admin.create({
@@ -126,42 +78,47 @@ const createDefaultAdmin = async () => {
     }
   } catch (err) {
     console.error("❌ Admin creation failed:", err.message);
-    // Non-fatal — don't crash startup
   }
 };
 
-// ==============================
-// ✅ MEMORY MONITOR
-// ==============================
+// ─── Memory monitor ───────────────────────────────────────────────────────────
 const startMemoryMonitor = () => {
   memoryMonitor = setInterval(() => {
-    const used = process.memoryUsage();
-    const rssMB = (used.rss / 1024 / 1024).toFixed(2);
-    const heapUsedMB = (used.heapUsed / 1024 / 1024).toFixed(2);
-    const heapTotalMB = (used.heapTotal / 1024 / 1024).toFixed(2);
-
-    if (rssMB > 400) {
-      console.warn(
-        `⚠️ High memory: RSS=${rssMB}MB Heap=${heapUsedMB}/${heapTotalMB}MB`,
-      );
-    }
-  }, 30000);
-
-  // ✅ Unref so this timer doesn't prevent graceful shutdown
+    const mb = (process.memoryUsage().rss / 1024 / 1024).toFixed(1);
+    if (mb > 400) console.warn(`⚠️ High memory: ${mb}MB RSS`);
+  }, 60000);
   memoryMonitor.unref();
 };
 
-// ==============================
-// ✅ START SERVER
-// ==============================
+// ─── Keep-alive self-ping ─────────────────────────────────────────────────────
+const startKeepAlive = () => {
+  const url = process.env.RENDER_EXTERNAL_URL;
+  if (!url) return;
+  setInterval(
+    () => {
+      fetch(`${url}/health`).catch(() => {});
+    },
+    8 * 60 * 1000,
+  ); // every 8 min (UptimeRobot covers 5 min, this is backup)
+};
+
+// ─── Mongoose event logs (single source) ─────────────────────────────────────
+mongoose.connection.on("error", (e) =>
+  console.error("🔴 MongoDB error:", e.message),
+);
+mongoose.connection.on("disconnected", () =>
+  console.warn("🟡 MongoDB disconnected — retrying..."),
+);
+mongoose.connection.on("reconnected", () =>
+  console.log("🟢 MongoDB reconnected"),
+);
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
 const startServer = async () => {
   try {
     await connectDB();
-
-    if (mongoose.connection.readyState !== 1) {
-      throw new Error("Database not connected");
-    }
-    console.log("✅ MongoDB connected");
+    if (mongoose.connection.readyState !== 1)
+      throw new Error("MongoDB not ready after connect");
 
     await createDefaultAdmin();
 
@@ -170,11 +127,12 @@ const startServer = async () => {
         `🚀 Server running on port ${PORT} (${process.env.NODE_ENV || "dev"})`,
       );
       console.log(`❤️  Health: /health`);
+      if (process.env.NODE_ENV === "production") startKeepAlive();
     });
 
     server.on("error", (err) => {
-      console.error("❌ Server error:", err.message);
-      shutdown("SERVER_ERROR");
+      console.error("❌ HTTP server error:", err.message);
+      // don't shutdown — let Render handle it
     });
 
     startMemoryMonitor();
@@ -185,25 +143,3 @@ const startServer = async () => {
 };
 
 startServer();
-
-// ==============================
-// ✅ RENDER SIGNALS
-// ==============================
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
-
-// ==============================
-// ✅ MONGOOSE EVENTS
-// ==============================
-mongoose.connection.on("connected", () => console.log("🟢 MongoDB connected"));
-mongoose.connection.on("error", (err) =>
-  console.error("🔴 MongoDB error:", err.message),
-);
-mongoose.connection.on("disconnected", () =>
-  console.warn("🟡 MongoDB disconnected — retrying..."),
-);
-mongoose.connection.on("reconnected", () =>
-  console.log("🟢 MongoDB reconnected"),
-);
-
-process.on("exit", (code) => console.log(`📋 Process exit: ${code}`));
