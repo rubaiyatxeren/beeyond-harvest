@@ -219,7 +219,7 @@ const createOrder = async (req, res) => {
     const finalDeliveryCharge = deliveryCharge || 60;
     const total = subtotal + finalDeliveryCharge;
 
-    // Generate order number (fast, no DB call needed)
+    // Generate order number
     const now = new Date();
     const fiveDigit = Math.floor(10000 + Math.random() * 90000);
     const orderNumber = `ORD-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${fiveDigit}`;
@@ -265,54 +265,74 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // ✅ SEND RESPONSE IMMEDIATELY (DON'T WAIT FOR EMAILS)
+    // ✅ SEND RESPONSE IMMEDIATELY
     res.status(201).json({
       success: true,
       data: order,
       message: "Order created successfully",
     });
 
-    // 🔥 FIRE AND FORGET - EMAILS IN BACKGROUND (NON-BLOCKING)
-    if (process.env.DISABLE_EMAIL !== "true") {
-      // Use setImmediate to defer email sending
-      setImmediate(async () => {
-        try {
-          console.log(`📧 Background emails for ${order.orderNumber}`);
+    // 🔥 FIRE AND FORGET EMAILS - COMPLETELY NON-BLOCKING
+    // This runs in background and will NEVER affect the response
+    (async () => {
+      try {
+        console.log(`📧 Background emails for ${order.orderNumber}`);
 
-          // Customer email (don't await - fire and forget)
-          sendEmail(
+        // Customer email - wrapped in try/catch, NEVER throws
+        try {
+          const customerEmailResult = await sendEmail(
             order.customer.email,
             `🎉 Order Confirmed - ${order.orderNumber}`,
             generateOrderEmailTemplate(order, "new_order"),
-          ).catch((err) => console.error("❌ Customer email:", err.message));
+          );
+          if (customerEmailResult?.success) {
+            console.log(`✅ Customer email sent to ${order.customer.email}`);
+          } else {
+            console.log(
+              `⚠️ Customer email skipped: ${customerEmailResult?.error || "unknown"}`,
+            );
+          }
+        } catch (err) {
+          // Silent fail - email error doesn't affect order
+          console.log(`📧 Customer email error (ignored): ${err.message}`);
+        }
 
-          // Admin emails (fire in parallel, don't await)
-          const adminEmails = (
-            process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
-          ).split(",");
-          const adminHtml = generateAdminEmailTemplate(order, "new_order");
+        // Admin emails - fire in parallel
+        const adminEmails = (
+          process.env.ADMIN_EMAILS || "ygstudiobd@gmail.com"
+        ).split(",");
+        const adminHtml = generateAdminEmailTemplate(order, "new_order");
 
-          adminEmails.forEach((email) => {
-            sendEmail(
+        for (const email of adminEmails) {
+          try {
+            const adminEmailResult = await sendEmail(
               email.trim(),
               `🆕 New Order #${order.orderNumber}`,
               adminHtml,
-            ).catch((err) =>
-              console.error(`❌ Admin email (${email}):`, err.message),
             );
-          });
-
-          console.log(`✅ Emails queued for ${order.orderNumber}`);
-        } catch (err) {
-          console.error("❌ Email background error:", err.message);
+            if (adminEmailResult?.success) {
+              console.log(`✅ Admin email sent to ${email}`);
+            }
+          } catch (err) {
+            // Silent fail
+            console.log(
+              `📧 Admin email error (ignored) for ${email}: ${err.message}`,
+            );
+          }
         }
-      });
-    }
+
+        console.log(`✅ Email background complete for ${order.orderNumber}`);
+      } catch (err) {
+        // Catch any unexpected error - just log, don't crash
+        console.log(`📧 Email background error (ignored): ${err.message}`);
+      }
+    })();
   } catch (error) {
     console.error("❌ Create order error:", error.message);
+    // NEVER expose internal errors to client
     res.status(500).json({
       success: false,
-      message: "Failed to create order",
+      message: "Failed to create order. Please try again.",
     });
   }
 };
@@ -439,13 +459,13 @@ const updateOrderStatus = async (req, res) => {
       message: `Order status updated to ${newStatus}${newStatus === "delivered" ? " & payment auto-completed" : ""}`,
     });
 
-    // 🔔 Background status email
-    if (oldStatus !== newStatus && process.env.DISABLE_EMAIL !== "true") {
-      setImmediate(async () => {
-        console.log(
-          `📧 [EMAIL] Sending status update for ${order.orderNumber} → ${newStatus}`,
-        );
+    // 🔔 Background status email - CRASH-PROOF
+    if (oldStatus !== newStatus) {
+      (async () => {
         try {
+          console.log(
+            `📧 [EMAIL] Status update for ${order.orderNumber} → ${newStatus}`,
+          );
           const result = await sendEmail(
             order.customer.email,
             `📦 Order ${order.orderNumber} Status Updated to ${newStatus.toUpperCase()}`,
@@ -453,19 +473,16 @@ const updateOrderStatus = async (req, res) => {
           );
           if (result?.success) {
             console.log(
-              `✅ [EMAIL] Status email sent → ${order.customer.email}`,
-            );
-          } else {
-            console.error(
-              `❌ [EMAIL] Status email failed → ${order.customer.email}: ${result?.error}`,
+              `✅ [EMAIL] Status email sent to ${order.customer.email}`,
             );
           }
         } catch (err) {
-          console.error("❌ [EMAIL] Status email crashed:", err.message);
+          // Silent fail - email error doesn't affect status update
+          console.log(
+            `📧 [EMAIL] Status email error (ignored): ${err.message}`,
+          );
         }
-      });
-    } else if (oldStatus === newStatus) {
-      console.log("📧 [EMAIL] Skipped — status unchanged");
+      })();
     }
   } catch (error) {
     console.error("❌ [STATUS] Update crashed:", error.message);
