@@ -338,7 +338,7 @@ const generateOrderEmailTemplate = (order, type = "new_order") => {
               ? `
           <tr>
             <td style="padding:5px 0;color:#86efac;font-size:13px;">🎟️ কুপন ছাড় ${order.coupon?.code ? `(${order.coupon.code})` : ""}</td>
-            <td style="padding:5px 0;text-align:right;color:#86efac;font-size:13px;font-weight:700;">-${order.discount.toLocaleString()} ৳</td>
+            <td style="padding:5px 0;text-align:right;color:#86efac;font-size:13px;font-weight:700;">- ${order.discount.toLocaleString()} ৳</td>
           </tr>`
               : ""
           }
