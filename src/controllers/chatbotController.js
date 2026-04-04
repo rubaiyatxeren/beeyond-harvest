@@ -1168,20 +1168,41 @@ const processMessage = async (req, res) => {
 // @access  Public
 const getSuggestions = async (req, res) => {
   try {
-    const [productCount, activeOffers] = await Promise.all([
+    const [productCount, activeCoupons] = await Promise.all([
       Product.countDocuments({ isActive: true, stock: { $gt: 0 } }),
-      Coupon.countDocuments({
+      Coupon.find({
         isActive: true,
-        $or: [{ endDate: null }, { endDate: { $gte: new Date() } }],
-      }),
+        $and: [
+          { $or: [{ endDate: null }, { endDate: { $gte: new Date() } }] },
+          {
+            $or: [
+              { usageLimit: { $exists: false } },
+              { usageLimit: null },
+              { $expr: { $lt: ["$usedCount", "$usageLimit"] } },
+            ],
+          },
+        ],
+      }).lean(),
     ]);
+
+    // Double-check manually (safety filter for any edge cases)
+    const now = new Date();
+    const validCoupons = activeCoupons.filter((c) => {
+      const expired = c.endDate && now > new Date(c.endDate);
+      const exhausted = c.usageLimit && c.usedCount >= c.usageLimit;
+      return !expired && !exhausted;
+    });
+
+    const activeOffersCount = validCoupons.length;
 
     const suggestions = [
       "আমার অর্ডার ট্র্যাক করুন",
       "অর্ডার করতে চাই",
       "কী পণ্য আছে?",
       "ডেলিভারি চার্জ কত?",
-      ...(activeOffers > 0 ? [`${activeOffers}টি কুপন আছে!`] : []),
+      ...(activeOffersCount > 0
+        ? [`🎟️ ${activeOffersCount}টি সক্রিয় কুপন আছে!`]
+        : []),
       "পেমেন্ট পদ্ধতি কী কী?",
       "রিটার্ন পলিসি কী?",
     ];
@@ -1189,9 +1210,10 @@ const getSuggestions = async (req, res) => {
     return res.json({
       success: true,
       suggestions,
-      stats: { productCount, activeOffers },
+      stats: { productCount, activeOffers: activeOffersCount },
     });
   } catch (error) {
+    console.error("Suggestions error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
