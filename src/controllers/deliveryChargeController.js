@@ -157,6 +157,54 @@ exports.updateDeliveryCharge = async (req, res) => {
   }
 };
 
+// Update a single delivery charge by ID (Admin only)
+exports.updateSingleDeliveryCharge = async (req, res) => {
+  console.log("📦 PUT /api/delivery-charges/:id called", req.params.id);
+  console.log("Request body:", req.body);
+
+  try {
+    const { id } = req.params;
+    const { name, amount, minOrderAmount, isActive } = req.body;
+
+    // Validate required fields
+    if (!name || amount === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: name and amount",
+      });
+    }
+
+    // Find the charge
+    const charge = await DeliveryCharge.findById(id);
+
+    if (!charge) {
+      return res.status(404).json({
+        success: false,
+        message: "Delivery charge not found",
+      });
+    }
+
+    // Update the charge
+    charge.name = name;
+    charge.amount = amount;
+    charge.minOrderAmount = minOrderAmount || 0;
+    charge.isActive = isActive !== undefined ? isActive : charge.isActive;
+    charge.updatedAt = Date.now();
+
+    await charge.save();
+
+    console.log("✅ Charge updated successfully");
+    res.json({
+      success: true,
+      data: charge,
+      message: "Delivery charge updated successfully",
+    });
+  } catch (error) {
+    console.error("❌ Error in updateSingleDeliveryCharge:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Delete delivery charge (Admin only)
 exports.deleteDeliveryCharge = async (req, res) => {
   console.log("📦 DELETE /api/delivery-charges/:id called", req.params.id);
