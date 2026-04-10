@@ -249,7 +249,7 @@ const deleteAdmin = async (req, res) => {
 // @access  Private
 const getMe = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.admin._id).select("-password");
+    const admin = await Admin.findById(req.user._id).select("-password"); // req.admin → req.user
     res.json({ success: true, data: admin });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -261,7 +261,7 @@ const getMe = async (req, res) => {
 // @access  Private
 const updateProfile = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.admin._id);
+    const admin = await Admin.findById(req.user._id); // req.admin → req.user
     admin.name = req.body.name || admin.name;
 
     if (req.body.password) {
@@ -275,6 +275,7 @@ const updateProfile = async (req, res) => {
         _id: admin._id,
         name: admin.name,
         email: admin.email,
+        role: admin.role,
       },
     });
   } catch (error) {
