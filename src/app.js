@@ -16,6 +16,7 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const deliveryChargeRoutes = require("./routes/deliveryChargeRoutes");
 const couponRoutes = require("./routes/couponRoutes");
 const chatbotRoutes = require("./routes/chatbotRoutes");
+const fraudRoutes = require("./routes/fraudRoutes");
 
 const app = express();
 
@@ -122,6 +123,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/delivery-charges", deliveryChargeRoutes);
 app.use("/api/coupons", couponRoutes);
 app.use("/api/chatbot", chatbotRoutes);
+app.use("/api/fraud", fraudRoutes);
 
 // ✅ DEBUG ROUTE LIST
 console.log("✅ Routes registered:");
@@ -172,9 +174,5 @@ app.use((req, res) => {
 
 // ✅ GLOBAL ERROR HANDLER
 app.use(errorHandler);
-
-// ❌ REMOVED: duplicate unhandledRejection + uncaughtException handlers
-// These are handled correctly in server.js with graceful shutdown.
-// Having them here caused double-firing and bypassed cleanup.
 
 module.exports = app;
