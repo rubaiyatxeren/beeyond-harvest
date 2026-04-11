@@ -102,10 +102,19 @@ const BOT_UA_PATTERNS = [
 // Checks: orders from same phone/email in last N minutes/hours
 // ══════════════════════════════════════════════════════════════════════════════
 async function checkVelocity(orderData) {
-  const { customer } = orderData;
+  const customer = orderData.customer || {};
   const now = new Date();
   const flags = [];
   let score = 0;
+
+  // Skip velocity checks if no phone or email — can't query meaningfully
+  if (!customer.phone && !customer.email) {
+    return {
+      score: 0,
+      flags: ["Missing phone and email — velocity skipped"],
+      data: {},
+    };
+  }
 
   const windows = [
     { label: "1min", ms: 1 * 60 * 1000, limit: 1, points: 40 },
@@ -120,16 +129,21 @@ async function checkVelocity(orderData) {
   for (const w of windows) {
     const since = new Date(now - w.ms);
 
-    const [byPhone, byEmail] = await Promise.all([
-      Order.countDocuments({
-        "customer.phone": customer.phone,
-        createdAt: { $gte: since },
-      }),
-      Order.countDocuments({
-        "customer.email": customer.email,
-        createdAt: { $gte: since },
-      }),
-    ]);
+    const phoneQuery = customer.phone
+      ? Order.countDocuments({
+          "customer.phone": customer.phone,
+          createdAt: { $gte: since },
+        })
+      : Promise.resolve(0);
+
+    const emailQuery = customer.email
+      ? Order.countDocuments({
+          "customer.email": customer.email,
+          createdAt: { $gte: since },
+        })
+      : Promise.resolve(0);
+
+    const [byPhone, byEmail] = await Promise.all([phoneQuery, emailQuery]);
 
     phoneCount[w.label] = byPhone;
     emailCount[w.label] = byEmail;
@@ -139,23 +153,31 @@ async function checkVelocity(orderData) {
       flags.push(`${byPhone} orders from same phone in last ${w.label}`);
     }
     if (byEmail > w.limit) {
-      score += Math.round(w.points * 0.8); // slightly lower weight for email
+      score += Math.round(w.points * 0.8);
       flags.push(`${byEmail} orders from same email in last ${w.label}`);
     }
   }
 
-  // Check for multiple DIFFERENT phones with the same name in 1h
-  const nameVariants = await Order.countDocuments({
-    "customer.name": {
-      $regex: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
-    },
-    "customer.phone": { $ne: customer.phone },
-    createdAt: { $gte: new Date(now - 3600000) },
-  });
-
-  if (nameVariants > 2) {
-    score += 25;
-    flags.push(`Same name used with ${nameVariants} different phones in 1h`);
+  // Same name, different phones — only if name exists
+  let nameVariants = 0;
+  if (customer.name && customer.name.trim().length > 0) {
+    try {
+      nameVariants = await Order.countDocuments({
+        "customer.name": {
+          $regex: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
+        },
+        "customer.phone": { $ne: customer.phone || "" },
+        createdAt: { $gte: new Date(now - 3600000) },
+      });
+      if (nameVariants > 2) {
+        score += 25;
+        flags.push(
+          `Same name used with ${nameVariants} different phones in 1h`,
+        );
+      }
+    } catch (err) {
+      console.warn("⚠️ [FRAUD] nameVariants query failed:", err.message);
+    }
   }
 
   return {
@@ -407,11 +429,12 @@ function checkAddressRisk(orderData) {
 // Checks: method + amount risk combos, COD on very large orders
 // ══════════════════════════════════════════════════════════════════════════════
 async function checkPaymentBehavior(orderData) {
-  const { customer, paymentMethod, total } = orderData;
+  const customer = orderData.customer || {};
+  const paymentMethod = orderData.paymentMethod || "";
+  const total = orderData.total || 0;
   const flags = [];
   let score = 0;
 
-  // COD on very large orders — high fraud/non-delivery risk
   if (paymentMethod === "cash_on_delivery") {
     if (total > 10000) {
       score += 30;
@@ -422,32 +445,38 @@ async function checkPaymentBehavior(orderData) {
     }
   }
 
-  // Check if same phone has multiple cancelled/returned COD orders (serial offender)
-  const badHistory = await Order.countDocuments({
-    "customer.phone": customer.phone,
-    orderStatus: { $in: ["cancelled", "returned"] },
-    paymentMethod: "cash_on_delivery",
-  });
-
-  if (badHistory >= 3) {
-    score += 40;
-    flags.push(`Phone has ${badHistory} cancelled/returned COD orders`);
-  } else if (badHistory >= 1) {
-    score += 15;
-    flags.push(`Phone has ${badHistory} previous cancelled/returned order(s)`);
+  // Only query if phone exists
+  let badHistory = 0;
+  if (customer.phone) {
+    badHistory = await Order.countDocuments({
+      "customer.phone": customer.phone,
+      orderStatus: { $in: ["cancelled", "returned"] },
+      paymentMethod: "cash_on_delivery",
+    });
+    if (badHistory >= 3) {
+      score += 40;
+      flags.push(`Phone has ${badHistory} cancelled/returned COD orders`);
+    } else if (badHistory >= 1) {
+      score += 15;
+      flags.push(
+        `Phone has ${badHistory} previous cancelled/returned order(s)`,
+      );
+    }
   }
 
-  // Same email, multiple payment methods (card-testing behavior)
-  const distinctMethods = await Order.distinct("paymentMethod", {
-    "customer.email": customer.email,
-    createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-  });
-
-  if (distinctMethods.length >= 3) {
-    score += 35;
-    flags.push(
-      `${distinctMethods.length} different payment methods from same email in 24h — card testing?`,
-    );
+  // Only query if email exists
+  let distinctMethods = [];
+  if (customer.email) {
+    distinctMethods = await Order.distinct("paymentMethod", {
+      "customer.email": customer.email,
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    });
+    if (distinctMethods.length >= 3) {
+      score += 35;
+      flags.push(
+        `${distinctMethods.length} different payment methods from same email in 24h — card testing?`,
+      );
+    }
   }
 
   return {
@@ -518,6 +547,21 @@ function checkDeviceFingerprint(requestMeta = {}) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function analyzeOrder(orderData, requestMeta = {}) {
   const startTime = Date.now();
+
+  // ── Normalize order data — guard against missing fields ────────────────────
+  if (!orderData.customer) {
+    orderData.customer = {};
+  }
+  if (!orderData.customer.phone) orderData.customer.phone = "";
+  if (!orderData.customer.email) orderData.customer.email = "";
+  if (!orderData.customer.name) orderData.customer.name = "";
+  if (!orderData.customer.address) orderData.customer.address = {};
+  if (!orderData.items) orderData.items = [];
+  if (!orderData.total) orderData.total = 0;
+  if (!orderData.subtotal) orderData.subtotal = 0;
+  if (!orderData.deliveryCharge) orderData.deliveryCharge = 0;
+  if (!orderData.discount) orderData.discount = 0;
+  if (!orderData.paymentMethod) orderData.paymentMethod = "";
 
   // Run all signals (some in parallel, some sequential)
   const [velocityResult, paymentResult] = await Promise.all([
