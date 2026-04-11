@@ -9,6 +9,7 @@ const {
   reviewFraudLog,
   getFraudStats,
   getCustomerRisk,
+  getFraudStatusBatch,
 } = require("../controllers/fraudController");
 
 // ─── All fraud routes require authentication ──────────────────────────────────
@@ -36,5 +37,7 @@ router.post("/bulk-scan", authorize("super_admin"), bulkScan);
 
 // Customer risk lookup — both admin roles
 router.get("/customer-risk", fraudAccess, getCustomerRisk);
+
+router.post("/status-batch", fraudAccess, getFraudStatusBatch);
 
 module.exports = router;
