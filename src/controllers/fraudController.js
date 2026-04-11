@@ -391,6 +391,39 @@ const getCustomerRisk = async (req, res) => {
   }
 };
 
+// @desc    Get fraud status for multiple orders at once
+// @route   POST /api/fraud/status-batch
+// @access  Private (Admin)
+const getFraudStatusBatch = async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+    if (!orderIds?.length) return res.json({ success: true, data: {} });
+
+    const logs = await FraudLog.find({
+      order: { $in: orderIds },
+    })
+      .select("order riskScore verdict reviewAction allFlags autoAction")
+      .lean();
+
+    // Build a map: { orderId: fraudData }
+    const map = {};
+    logs.forEach((log) => {
+      map[String(log.order)] = {
+        riskScore: log.riskScore,
+        verdict: log.verdict,
+        reviewAction: log.reviewAction,
+        topFlag: log.allFlags?.[0] || null,
+        autoAction: log.autoAction,
+        logId: log._id,
+      };
+    });
+
+    res.json({ success: true, data: map });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   analyzeOrderById,
   bulkScan,
@@ -399,4 +432,5 @@ module.exports = {
   reviewFraudLog,
   getFraudStats,
   getCustomerRisk,
+  getFraudStatusBatch,
 };
