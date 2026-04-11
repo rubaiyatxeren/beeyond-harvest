@@ -1,6 +1,7 @@
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const { sendEmail } = require("../utils/emailService");
+const { analyzeOrder, saveAnalysis } = require("../utils/fraudEngine");
 
 // ─── Email Templates ──────────────────────────────────────────────────────────
 
@@ -815,6 +816,67 @@ const createOrder = async (req, res) => {
 
     console.log("✅ Stock updated atomically");
 
+    // ── FRAUD ANALYSIS (runs before response) ──────────────────────────────────
+    const requestMeta = {
+      ipAddress:
+        (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+        req.socket?.remoteAddress ||
+        "unknown",
+      userAgent: req.headers["user-agent"] || "",
+      headers: req.headers,
+    };
+
+    // Pass the full order object (just created) to the engine
+    const fraudResult = await analyzeOrder(
+      {
+        ...order.toObject(),
+        // also pass raw items from request body for price mismatch check
+        items: orderItems,
+        subtotal,
+        total,
+        deliveryCharge: deliveryCharge || 60,
+        discount: discountAmount,
+      },
+      requestMeta,
+    );
+
+    // Save log in background (non-blocking)
+    setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
+
+    // Auto-cancel blocked orders
+    if (fraudResult.verdict === "blocked") {
+      await Order.findByIdAndDelete(order._id);
+      // Restore stock
+      const restoreOps = items.map((item) => ({
+        updateOne: {
+          filter: { _id: item.product },
+          update: { $inc: { stock: item.quantity } },
+        },
+      }));
+      await Product.bulkWrite(restoreOps);
+
+      console.warn(
+        `🚫 [FRAUD] Order BLOCKED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+      );
+
+      return res.status(422).json({
+        success: false,
+        message:
+          "আপনার অর্ডারটি প্রক্রিয়া করা যায়নি। সহায়তার জন্য যোগাযোগ করুন।",
+        code: "ORDER_FRAUD_BLOCKED",
+      });
+    }
+
+    // Flag review orders — create them but mark with a note
+    if (fraudResult.verdict === "review") {
+      await Order.findByIdAndUpdate(order._id, {
+        adminNotes: `⚠️ FRAUD REVIEW REQUIRED — Score: ${fraudResult.riskScore} | Flags: ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
+      });
+      console.warn(
+        `⚠️  [FRAUD] Order flagged for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+      );
+    }
+
     // ==============================
     // ✅ RESPONSE FIRST (FAST API)
     // ==============================
@@ -822,6 +884,10 @@ const createOrder = async (req, res) => {
       success: true,
       data: order,
       message: "Order created successfully",
+      // only expose verdict to client (not the full score/flags)
+      ...(fraudResult.verdict === "review" && {
+        warning: "অর্ডারটি রিভিউয়ের অপেক্ষায় রয়েছে।",
+      }),
     });
 
     // ==============================
