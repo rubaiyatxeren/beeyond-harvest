@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect } = require("../middleware/authMiddleware");
+const { protect, authorize } = require("../middleware/authMiddleware");
 const {
   analyzeOrderById,
   bulkScan,
@@ -11,22 +11,30 @@ const {
   getCustomerRisk,
 } = require("../controllers/fraudController");
 
-// All fraud routes are admin-only
+// ─── All fraud routes require authentication ──────────────────────────────────
 router.use(protect);
 
-// Dashboard
-router.get("/stats", getFraudStats);
+// ─── Role restriction: only super_admin and admin ─────────────────────────────
+// managers cannot access fraud detection at all
+const fraudAccess = authorize("super_admin", "admin");
 
-// Logs
-router.get("/logs", getFraudLogs);
-router.get("/logs/:id", getFraudLog);
-router.put("/logs/:id/review", reviewFraudLog);
+// Dashboard stats
+router.get("/stats", fraudAccess, getFraudStats);
 
-// Analysis
-router.post("/analyze/:orderId", analyzeOrderById);
-router.post("/bulk-scan", bulkScan);
+// Fraud logs — read-only, both admin roles
+router.get("/logs", fraudAccess, getFraudLogs);
+router.get("/logs/:id", fraudAccess, getFraudLog);
 
-// Customer risk profile
-router.get("/customer-risk", getCustomerRisk);
+// Review action — only super_admin can approve/reject/escalate
+router.put("/logs/:id/review", authorize("super_admin"), reviewFraudLog);
+
+// Analysis — only super_admin can trigger manual scans
+router.post("/analyze/:orderId", authorize("super_admin"), analyzeOrderById);
+
+// Bulk scan — super_admin only (expensive operation)
+router.post("/bulk-scan", authorize("super_admin"), bulkScan);
+
+// Customer risk lookup — both admin roles
+router.get("/customer-risk", fraudAccess, getCustomerRisk);
 
 module.exports = router;
