@@ -1,15 +1,7 @@
 /**
  * ╔═══════════════════════════════════════════════════════════════════╗
- * ║              BeeHarvest Fraud Detection Engine v1.0              ║
- * ║   Multi-signal scoring: 0 = clean, 100 = definite fraud          ║
- * ║                                                                   ║
- * ║  Signals:                                                         ║
- * ║  1. Velocity      — orders/minute, repeat attempts               ║
- * ║  2. Order Pattern — item combos, price manipulation, qty spikes  ║
- * ║  3. Customer      — name quality, email patterns, phone checks   ║
- * ║  4. Address Risk  — high-risk areas, incomplete addresses         ║
- * ║  5. Payment       — method + amount risk combinations            ║
- * ║  6. Device        — fingerprint, bot patterns, header anomalies  ║
+ * ║              BeeHarvest Fraud Detection Engine v1.1              ║
+ * ║   Hardened against missing/null fields from real order data      ║
  * ╚═══════════════════════════════════════════════════════════════════╝
  */
 
@@ -19,9 +11,9 @@ const crypto = require("crypto");
 
 // ─── Thresholds ────────────────────────────────────────────────────────────────
 const THRESHOLDS = {
-  SAFE: 30, // 0–30: safe, proceed
-  REVIEW: 60, // 31–60: flag for manual review
-  BLOCK: 60, // 61–100: auto-block
+  SAFE: 30,
+  REVIEW: 60,
+  BLOCK: 60,
 };
 
 // ─── Signal Weights (must sum to 100) ─────────────────────────────────────────
@@ -34,10 +26,8 @@ const WEIGHTS = {
   deviceFingerprint: 8,
 };
 
-// ─── High-risk phone prefixes (VoIP / disposable) ─────────────────────────────
 const SUSPICIOUS_PHONE_PREFIXES = ["016", "019"];
 
-// ─── Disposable email domains ─────────────────────────────────────────────────
 const DISPOSABLE_EMAIL_DOMAINS = [
   "mailinator.com",
   "guerrillamail.com",
@@ -64,7 +54,6 @@ const DISPOSABLE_EMAIL_DOMAINS = [
   "discard.email",
 ];
 
-// ─── High-risk address keywords ───────────────────────────────────────────────
 const HIGH_RISK_AREA_KEYWORDS = [
   "unknown",
   "test",
@@ -81,7 +70,6 @@ const HIGH_RISK_AREA_KEYWORDS = [
   "demo",
 ];
 
-// ─── Known bot/scraper user-agent patterns ────────────────────────────────────
 const BOT_UA_PATTERNS = [
   /bot/i,
   /crawler/i,
@@ -97,21 +85,54 @@ const BOT_UA_PATTERNS = [
   /libwww/i,
 ];
 
+// ─── Normalize incoming order data to safe defaults ───────────────────────────
+function normalizeOrderData(orderData) {
+  const o = { ...orderData };
+
+  // Customer defaults
+  if (!o.customer || typeof o.customer !== "object") o.customer = {};
+  o.customer.name = (o.customer.name || "").trim();
+  o.customer.email = (o.customer.email || "").trim().toLowerCase();
+  o.customer.phone = (o.customer.phone || "").trim();
+  if (!o.customer.address || typeof o.customer.address !== "object") {
+    o.customer.address = {};
+  }
+
+  // Order fields
+  o.items = Array.isArray(o.items) ? o.items : [];
+  o.total = Number(o.total) || 0;
+  o.subtotal = Number(o.subtotal) || 0;
+  o.deliveryCharge = Number(o.deliveryCharge) || 0;
+  o.discount = Number(o.discount) || 0;
+  o.paymentMethod = o.paymentMethod || "";
+
+  // Normalize each item — handle both populated and non-populated products
+  o.items = o.items.map((item) => ({
+    name: item.name || item.product?.name || "Unknown Product",
+    price: Number(item.price) || 0,
+    quantity: Number(item.quantity) || 1,
+    total:
+      Number(item.total) || Number(item.price) * Number(item.quantity) || 0,
+    sku: item.sku || "",
+  }));
+
+  return o;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL 1: VELOCITY CHECK
-// Checks: orders from same phone/email in last N minutes/hours
 // ══════════════════════════════════════════════════════════════════════════════
 async function checkVelocity(orderData) {
-  const customer = orderData.customer || {};
+  const { customer } = orderData;
   const now = new Date();
   const flags = [];
   let score = 0;
 
-  // Skip velocity checks if no phone or email — can't query meaningfully
+  // Can't do velocity checks without at least one identifier
   if (!customer.phone && !customer.email) {
     return {
       score: 0,
-      flags: ["Missing phone and email — velocity skipped"],
+      flags: ["No phone or email — velocity check skipped"],
       data: {},
     };
   }
@@ -129,21 +150,20 @@ async function checkVelocity(orderData) {
   for (const w of windows) {
     const since = new Date(now - w.ms);
 
-    const phoneQuery = customer.phone
-      ? Order.countDocuments({
-          "customer.phone": customer.phone,
-          createdAt: { $gte: since },
-        })
-      : Promise.resolve(0);
-
-    const emailQuery = customer.email
-      ? Order.countDocuments({
-          "customer.email": customer.email,
-          createdAt: { $gte: since },
-        })
-      : Promise.resolve(0);
-
-    const [byPhone, byEmail] = await Promise.all([phoneQuery, emailQuery]);
+    const [byPhone, byEmail] = await Promise.all([
+      customer.phone
+        ? Order.countDocuments({
+            "customer.phone": customer.phone,
+            createdAt: { $gte: since },
+          })
+        : Promise.resolve(0),
+      customer.email
+        ? Order.countDocuments({
+            "customer.email": customer.email,
+            createdAt: { $gte: since },
+          })
+        : Promise.resolve(0),
+    ]);
 
     phoneCount[w.label] = byPhone;
     emailCount[w.label] = byEmail;
@@ -158,15 +178,15 @@ async function checkVelocity(orderData) {
     }
   }
 
-  // Same name, different phones — only if name exists
+  // Same name, different phones — only if name is meaningful
   let nameVariants = 0;
-  if (customer.name && customer.name.trim().length > 0) {
+  if (customer.name && customer.name.length >= 3 && customer.phone) {
     try {
       nameVariants = await Order.countDocuments({
         "customer.name": {
           $regex: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
         },
-        "customer.phone": { $ne: customer.phone || "" },
+        "customer.phone": { $ne: customer.phone },
         createdAt: { $gte: new Date(now - 3600000) },
       });
       if (nameVariants > 2) {
@@ -189,19 +209,13 @@ async function checkVelocity(orderData) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL 2: ORDER PATTERN ANALYSIS
-// Checks: unusually large orders, round prices, single-item bulk, item combos
 // ══════════════════════════════════════════════════════════════════════════════
-async function checkOrderPattern(orderData) {
-  const items = orderData.items || [];
-  const total = orderData.total || 0;
-  const subtotal = orderData.subtotal || 0;
-  const deliveryCharge = orderData.deliveryCharge || 0;
-  const discount = orderData.discount || 0;
-
+function checkOrderPattern(orderData) {
+  const { items, total, subtotal, deliveryCharge, discount } = orderData;
   const flags = [];
   let score = 0;
 
-  // Huge single order
+  // High value checks
   if (total > 50000) {
     score += 30;
     flags.push(`Very high order value: ৳${total.toLocaleString()}`);
@@ -210,7 +224,7 @@ async function checkOrderPattern(orderData) {
     flags.push(`High order value: ৳${total.toLocaleString()}`);
   }
 
-  // Excessive quantity on a single item
+  // Bulk quantity
   const highQtyItems = items.filter((i) => i.quantity > 20);
   if (highQtyItems.length > 0) {
     score += 25;
@@ -222,13 +236,13 @@ async function checkOrderPattern(orderData) {
     flags.push("Unusually high item quantity (>10)");
   }
 
-  // Max items in a single order
+  // Too many distinct items
   if (items.length > 15) {
     score += 20;
     flags.push(`Suspiciously many distinct items: ${items.length}`);
   }
 
-  // Discount manipulation: discount >= 80% of subtotal
+  // Discount ratio checks
   if (discount > 0 && subtotal > 0) {
     const discountRatio = discount / subtotal;
     if (discountRatio >= 0.8) {
@@ -244,29 +258,37 @@ async function checkOrderPattern(orderData) {
     }
   }
 
-  // Delivery charge manipulation (negative or zero on large order)
+  // Free delivery on large order
   if (deliveryCharge === 0 && total > 1000) {
     score += 10;
     flags.push("Free delivery on large order — verify coupon legitimacy");
   }
 
-  // Price total mismatch check (recalculate)
-  const expectedSubtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
-  const reportedSubtotal = subtotal;
-  if (Math.abs(expectedSubtotal - reportedSubtotal) > 1) {
-    score += 40;
-    flags.push(
-      `Subtotal mismatch: expected ৳${expectedSubtotal} got ৳${reportedSubtotal}`,
+  // Recalculate and compare — only flag if items have valid prices
+  const itemsWithPrices = items.filter((i) => i.price > 0 && i.quantity > 0);
+  if (itemsWithPrices.length > 0) {
+    const expectedSubtotal = itemsWithPrices.reduce(
+      (s, i) => s + i.price * i.quantity,
+      0,
     );
-  }
 
-  const expectedTotal = Math.max(
-    0,
-    expectedSubtotal + deliveryCharge - discount,
-  );
-  if (Math.abs(expectedTotal - total) > 1) {
-    score += 40;
-    flags.push(`Total mismatch: expected ৳${expectedTotal} got ৳${total}`);
+    if (subtotal > 0 && Math.abs(expectedSubtotal - subtotal) > 5) {
+      score += 40;
+      flags.push(
+        `Subtotal mismatch: expected ৳${expectedSubtotal.toFixed(0)} got ৳${subtotal}`,
+      );
+    }
+
+    const expectedTotal = Math.max(
+      0,
+      expectedSubtotal + deliveryCharge - discount,
+    );
+    if (total > 0 && Math.abs(expectedTotal - total) > 5) {
+      score += 40;
+      flags.push(
+        `Total mismatch: expected ৳${expectedTotal.toFixed(0)} got ৳${total}`,
+      );
+    }
   }
 
   return {
@@ -278,39 +300,33 @@ async function checkOrderPattern(orderData) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL 3: CUSTOMER PROFILE ANALYSIS
-// Checks: name quality, email patterns, phone format, profile consistency
 // ══════════════════════════════════════════════════════════════════════════════
 function checkCustomerProfile(orderData) {
   const { customer } = orderData;
+  const { name, email, phone } = customer;
   const flags = [];
   let score = 0;
 
-  const { name, email, phone } = customer;
-
-  // ── Name checks ────────────────────────────────────────────────────────────
-  if (!name || name.trim().length < 3) {
+  // Name checks
+  if (!name || name.length < 3) {
     score += 20;
     flags.push("Name too short or missing");
   }
-  // Only digits/special chars in name
   if (name && /^[\d\s\W]+$/.test(name)) {
     score += 30;
     flags.push("Name contains only numbers or special characters");
   }
-  // Keyboard mash patterns
   if (name && /(.)\1{3,}/.test(name)) {
     score += 20;
     flags.push("Repeated character pattern in name");
   }
-  // Consecutive keyboard chars
   if (name && /(qwerty|asdf|zxcv|1234|abcd)/i.test(name)) {
     score += 25;
     flags.push("Keyboard pattern detected in name");
   }
 
-  // ── Email checks ───────────────────────────────────────────────────────────
+  // Email checks
   const emailDomain = email ? email.split("@")[1]?.toLowerCase() : null;
-
   if (!email || !email.includes("@")) {
     score += 25;
     flags.push("Invalid email format");
@@ -318,51 +334,38 @@ function checkCustomerProfile(orderData) {
     score += 40;
     flags.push(`Disposable email domain: ${emailDomain}`);
   }
-
-  // Email looks auto-generated: random chars before @
   if (email) {
     const localPart = email.split("@")[0];
-    // e.g. "xjf93k28@..." — more than 8 chars, mostly random
     if (/^[a-z0-9]{8,}$/.test(localPart) && !/[aeiou]{2,}/.test(localPart)) {
       score += 15;
       flags.push("Email local part looks auto-generated");
     }
-    // Sequential numbers: test123, user456
     if (/test\d+|user\d+|demo\d+|fake\d+/i.test(localPart)) {
       score += 20;
       flags.push("Generic test/fake email pattern");
     }
   }
 
-  // ── Phone checks ───────────────────────────────────────────────────────────
+  // Phone checks
   if (!phone) {
     score += 30;
     flags.push("Missing phone number");
   } else {
     const cleanPhone = phone.replace(/\D/g, "");
-
-    // Must be 11 digits for Bangladesh
     if (cleanPhone.length !== 11) {
       score += 25;
       flags.push(`Invalid phone length: ${cleanPhone.length} digits`);
     }
-
-    // All same digit: 01111111111
     if (/^(\d)\1+$/.test(cleanPhone)) {
       score += 40;
       flags.push("Phone number is all same digit");
     }
-
-    // Sequential: 01234567890
     if (/01234567890|09876543210/.test(cleanPhone)) {
       score += 35;
       flags.push("Sequential phone number detected");
     }
-
-    // Suspicious prefix
-    // Note: This is contextual — adjust based on your actual business data
     if (SUSPICIOUS_PHONE_PREFIXES.some((p) => cleanPhone.startsWith(p))) {
-      score += 5; // low weight — just a soft signal
+      score += 5;
       flags.push(
         `Phone prefix flagged (soft signal): ${cleanPhone.slice(0, 3)}`,
       );
@@ -372,23 +375,23 @@ function checkCustomerProfile(orderData) {
   return {
     score: Math.min(score, 100),
     flags,
-    data: { emailDomain, phoneLength: phone?.replace(/\D/g, "").length },
+    data: { emailDomain, phoneLength: phone?.replace(/\D/g, "").length || 0 },
   };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL 4: ADDRESS RISK
-// Checks: missing fields, keyword patterns, inconsistency
+// Matches your Order schema: { street, city, area, postalCode, district, division }
 // ══════════════════════════════════════════════════════════════════════════════
 function checkAddressRisk(orderData) {
-  const { customer } = orderData;
-  const addr = customer.address || {};
+  const addr = orderData.customer.address || {};
   const flags = [];
   let score = 0;
 
-  const requiredFields = ["street", "area", "city"];
+  // Your schema has: street, city, area — check for these
+  const requiredFields = ["street", "city"];
   const missingFields = requiredFields.filter(
-    (f) => !addr[f] || addr[f].trim() === "",
+    (f) => !addr[f] || String(addr[f]).trim() === "",
   );
 
   if (missingFields.length === requiredFields.length) {
@@ -399,39 +402,47 @@ function checkAddressRisk(orderData) {
     flags.push(`Missing address fields: ${missingFields.join(", ")}`);
   }
 
-  // Check for suspicious keywords in any address field
-  const addressText = Object.values(addr).join(" ").toLowerCase();
+  // Check for suspicious keywords across all address values
+  const addressText = Object.values(addr)
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
   const badKeywords = HIGH_RISK_AREA_KEYWORDS.filter((k) =>
     addressText.includes(k),
   );
   if (badKeywords.length > 0) {
-    score += badKeywords.length * 15;
+    score += Math.min(badKeywords.length * 15, 45);
     flags.push(`Suspicious address content: ${badKeywords.join(", ")}`);
   }
 
-  // Very short address fields
-  if (addr.street && addr.street.trim().length < 5) {
+  // Short street address
+  if (addr.street && String(addr.street).trim().length < 5) {
     score += 10;
     flags.push("Street address suspiciously short");
   }
 
-  // Repeated character pattern in address
-  if (Object.values(addr).some((v) => v && /(.)\1{3,}/.test(v))) {
+  // Repeated chars in address
+  const hasRepeatedChars = Object.values(addr).some(
+    (v) => v && /(.)\1{3,}/.test(String(v)),
+  );
+  if (hasRepeatedChars) {
     score += 20;
     flags.push("Repeated character pattern in address");
   }
 
-  return { score: Math.min(score, 100), flags, data: { missingFields, addr } };
+  return {
+    score: Math.min(score, 100),
+    flags,
+    data: { missingFields, city: addr.city, area: addr.area },
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL 5: PAYMENT BEHAVIOR
-// Checks: method + amount risk combos, COD on very large orders
 // ══════════════════════════════════════════════════════════════════════════════
 async function checkPaymentBehavior(orderData) {
-  const customer = orderData.customer || {};
-  const paymentMethod = orderData.paymentMethod || "";
-  const total = orderData.total || 0;
+  const { customer, paymentMethod, total } = orderData;
   const flags = [];
   let score = 0;
 
@@ -445,7 +456,6 @@ async function checkPaymentBehavior(orderData) {
     }
   }
 
-  // Only query if phone exists
   let badHistory = 0;
   if (customer.phone) {
     badHistory = await Order.countDocuments({
@@ -464,7 +474,6 @@ async function checkPaymentBehavior(orderData) {
     }
   }
 
-  // Only query if email exists
   let distinctMethods = [];
   if (customer.email) {
     distinctMethods = await Order.distinct("paymentMethod", {
@@ -488,7 +497,6 @@ async function checkPaymentBehavior(orderData) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL 6: DEVICE FINGERPRINT
-// Checks: bot UA, missing headers, suspicious request patterns
 // ══════════════════════════════════════════════════════════════════════════════
 function checkDeviceFingerprint(requestMeta = {}) {
   const userAgent = requestMeta.userAgent || "";
@@ -501,8 +509,7 @@ function checkDeviceFingerprint(requestMeta = {}) {
     score += 30;
     flags.push("Missing User-Agent header");
   } else {
-    const isBot = BOT_UA_PATTERNS.some((p) => p.test(userAgent));
-    if (isBot) {
+    if (BOT_UA_PATTERNS.some((p) => p.test(userAgent))) {
       score += 45;
       flags.push(`Bot/automation User-Agent: ${userAgent.slice(0, 60)}`);
     }
@@ -512,14 +519,10 @@ function checkDeviceFingerprint(requestMeta = {}) {
     }
   }
 
-  const hasAccept = !!headers["accept"];
-  const hasAcceptLang = !!headers["accept-language"];
-  const hasAcceptEncoding = !!headers["accept-encoding"];
-
   const missingBrowserHeaders = [
-    !hasAccept && "Accept",
-    !hasAcceptLang && "Accept-Language",
-    !hasAcceptEncoding && "Accept-Encoding",
+    !headers["accept"] && "Accept",
+    !headers["accept-language"] && "Accept-Language",
+    !headers["accept-encoding"] && "Accept-Encoding",
   ].filter(Boolean);
 
   if (missingBrowserHeaders.length >= 2) {
@@ -543,30 +546,35 @@ function checkDeviceFingerprint(requestMeta = {}) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MASTER ANALYZER — orchestrates all signals and computes weighted score
+// MASTER ANALYZER
 // ══════════════════════════════════════════════════════════════════════════════
-async function analyzeOrder(orderData, requestMeta = {}) {
+async function analyzeOrder(rawOrderData, requestMeta = {}) {
   const startTime = Date.now();
 
-  // ── Normalize order data — guard against missing fields ────────────────────
-  if (!orderData.customer) {
-    orderData.customer = {};
-  }
-  if (!orderData.customer.phone) orderData.customer.phone = "";
-  if (!orderData.customer.email) orderData.customer.email = "";
-  if (!orderData.customer.name) orderData.customer.name = "";
-  if (!orderData.customer.address) orderData.customer.address = {};
-  if (!orderData.items) orderData.items = [];
-  if (!orderData.total) orderData.total = 0;
-  if (!orderData.subtotal) orderData.subtotal = 0;
-  if (!orderData.deliveryCharge) orderData.deliveryCharge = 0;
-  if (!orderData.discount) orderData.discount = 0;
-  if (!orderData.paymentMethod) orderData.paymentMethod = "";
+  // Normalize first — all signals receive clean data
+  const orderData = normalizeOrderData(rawOrderData);
 
-  // Run all signals (some in parallel, some sequential)
+  console.log(
+    `🛡️  [FRAUD] Analyzing order ${orderData.orderNumber || "UNKNOWN"} | items=${orderData.items.length} | total=${orderData.total}`,
+  );
+
   const [velocityResult, paymentResult] = await Promise.all([
-    checkVelocity(orderData),
-    checkPaymentBehavior(orderData),
+    checkVelocity(orderData).catch((err) => {
+      console.error("⚠️ [FRAUD] velocity check failed:", err.message);
+      return {
+        score: 0,
+        flags: [`Velocity check error: ${err.message}`],
+        data: {},
+      };
+    }),
+    checkPaymentBehavior(orderData).catch((err) => {
+      console.error("⚠️ [FRAUD] payment check failed:", err.message);
+      return {
+        score: 0,
+        flags: [`Payment check error: ${err.message}`],
+        data: {},
+      };
+    }),
   ]);
 
   const orderPatternResult = checkOrderPattern(orderData);
@@ -574,7 +582,7 @@ async function analyzeOrder(orderData, requestMeta = {}) {
   const addressResult = checkAddressRisk(orderData);
   const deviceResult = checkDeviceFingerprint(requestMeta);
 
-  // ── Weighted composite score ────────────────────────────────────────────────
+  // Weighted composite score
   const rawScore =
     (velocityResult.score * WEIGHTS.velocity) / 100 +
     (orderPatternResult.score * WEIGHTS.orderPattern) / 100 +
@@ -585,27 +593,21 @@ async function analyzeOrder(orderData, requestMeta = {}) {
 
   const riskScore = Math.round(Math.min(rawScore, 100));
 
-  // ── Critical flag override (instant block regardless of score) ─────────────
+  // Critical flag override
   const criticalFlags = [
     ...orderPatternResult.flags.filter((f) => f.includes("mismatch")),
     ...deviceResult.flags.filter((f) => f.includes("Bot")),
     ...customerResult.flags.filter((f) => f.includes("Disposable")),
   ];
-
   const hasCritical = criticalFlags.length > 0;
   const effectiveScore = hasCritical ? Math.max(riskScore, 65) : riskScore;
 
-  // ── Verdict ─────────────────────────────────────────────────────────────────
+  // Verdict
   let verdict;
-  if (effectiveScore <= THRESHOLDS.SAFE) {
-    verdict = "safe";
-  } else if (effectiveScore <= THRESHOLDS.REVIEW) {
-    verdict = "review";
-  } else {
-    verdict = "blocked";
-  }
+  if (effectiveScore <= THRESHOLDS.SAFE) verdict = "safe";
+  else if (effectiveScore <= THRESHOLDS.REVIEW) verdict = "review";
+  else verdict = "blocked";
 
-  // ── Collect all flags ───────────────────────────────────────────────────────
   const allFlags = [
     ...velocityResult.flags,
     ...orderPatternResult.flags,
@@ -638,15 +640,13 @@ async function analyzeOrder(orderData, requestMeta = {}) {
   };
 }
 
-// ── Save analysis result to DB ────────────────────────────────────────────────
+// ── Save to DB ─────────────────────────────────────────────────────────────────
 async function saveAnalysis(order, analysisResult, requestMeta = {}) {
   try {
-    // Ensure we have order._id
-    if (!order || !order._id) {
-      console.error("❌ [FRAUD] Invalid order for saveAnalysis");
+    if (!order?._id) {
+      console.error("❌ [FRAUD] saveAnalysis called with invalid order");
       return null;
     }
-
     const log = await FraudLog.findOneAndUpdate(
       { order: order._id },
       {
@@ -665,20 +665,13 @@ async function saveAnalysis(order, analysisResult, requestMeta = {}) {
     );
     return log;
   } catch (err) {
-    console.error("❌ [FRAUD] Failed to save analysis:", err);
-    console.error("❌ Stack:", err.stack);
+    console.error("❌ [FRAUD] Failed to save analysis:", err.message);
     return null;
   }
 }
 
-// ── Helper ─────────────────────────────────────────────────────────────────────
 function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-module.exports = {
-  analyzeOrder,
-  saveAnalysis,
-  THRESHOLDS,
-  WEIGHTS,
-};
+module.exports = { analyzeOrder, saveAnalysis, THRESHOLDS, WEIGHTS };
