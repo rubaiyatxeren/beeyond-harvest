@@ -17,12 +17,17 @@ const extractRequestMeta = (req) => ({
 // @access  Private (Admin)
 const analyzeOrderById = async (req, res) => {
   try {
+    console.log(`🔍 [FRAUD] Analyzing order: ${req.params.orderId}`);
+
     const order = await Order.findById(req.params.orderId).lean();
     if (!order) {
+      console.log(`❌ [FRAUD] Order not found: ${req.params.orderId}`);
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
     }
+
+    console.log(`✅ [FRAUD] Order found: ${order.orderNumber}`);
 
     const requestMeta = extractRequestMeta(req);
     const result = await analyzeOrder(order, requestMeta);
@@ -41,8 +46,14 @@ const analyzeOrderById = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ [FRAUD] Analyze error:", error.message);
-    res.status(500).json({ success: false, message: error.message });
+    console.error("❌ [FRAUD] Analyze error:", error);
+    console.error("❌ Stack trace:", error.stack);
+    // Send proper error response
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
   }
 };
 
