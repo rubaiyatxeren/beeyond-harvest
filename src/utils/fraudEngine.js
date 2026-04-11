@@ -170,7 +170,12 @@ async function checkVelocity(orderData) {
 // Checks: unusually large orders, round prices, single-item bulk, item combos
 // ══════════════════════════════════════════════════════════════════════════════
 async function checkOrderPattern(orderData) {
-  const { items, total, subtotal, deliveryCharge, discount } = orderData;
+  const items = orderData.items || [];
+  const total = orderData.total || 0;
+  const subtotal = orderData.subtotal || 0;
+  const deliveryCharge = orderData.deliveryCharge || 0;
+  const discount = orderData.discount || 0;
+
   const flags = [];
   let score = 0;
 
@@ -456,52 +461,44 @@ async function checkPaymentBehavior(orderData) {
 // SIGNAL 6: DEVICE FINGERPRINT
 // Checks: bot UA, missing headers, suspicious request patterns
 // ══════════════════════════════════════════════════════════════════════════════
-function checkDeviceFingerprint(requestMeta) {
-  const { userAgent, ipAddress, headers } = requestMeta;
+function checkDeviceFingerprint(requestMeta = {}) {
+  const userAgent = requestMeta.userAgent || "";
+  const ipAddress = requestMeta.ipAddress || "unknown";
+  const headers = requestMeta.headers || {};
   const flags = [];
   let score = 0;
 
-  // No user agent at all
   if (!userAgent) {
     score += 30;
     flags.push("Missing User-Agent header");
   } else {
-    // Bot/automation tool patterns
     const isBot = BOT_UA_PATTERNS.some((p) => p.test(userAgent));
     if (isBot) {
       score += 45;
       flags.push(`Bot/automation User-Agent: ${userAgent.slice(0, 60)}`);
     }
-
-    // Very short UA (likely spoofed)
     if (userAgent.length < 20) {
       score += 20;
       flags.push("Suspiciously short User-Agent");
     }
   }
 
-  // Headless browser signals
-  if (headers) {
-    const hasAccept = !!headers["accept"];
-    const hasAcceptLang = !!headers["accept-language"];
-    const hasAcceptEncoding = !!headers["accept-encoding"];
+  const hasAccept = !!headers["accept"];
+  const hasAcceptLang = !!headers["accept-language"];
+  const hasAcceptEncoding = !!headers["accept-encoding"];
 
-    const missingBrowserHeaders = [
-      !hasAccept && "Accept",
-      !hasAcceptLang && "Accept-Language",
-      !hasAcceptEncoding && "Accept-Encoding",
-    ].filter(Boolean);
+  const missingBrowserHeaders = [
+    !hasAccept && "Accept",
+    !hasAcceptLang && "Accept-Language",
+    !hasAcceptEncoding && "Accept-Encoding",
+  ].filter(Boolean);
 
-    if (missingBrowserHeaders.length >= 2) {
-      score += 25;
-      flags.push(
-        `Missing browser headers: ${missingBrowserHeaders.join(", ")}`,
-      );
-    }
+  if (missingBrowserHeaders.length >= 2) {
+    score += 25;
+    flags.push(`Missing browser headers: ${missingBrowserHeaders.join(", ")}`);
   }
 
-  // Generate a fingerprint hash for tracking
-  const fingerprintInput = `${userAgent}|${ipAddress}|${headers?.["accept-language"] || ""}`;
+  const fingerprintInput = `${userAgent}|${ipAddress}|${headers["accept-language"] || ""}`;
   const fingerprint = crypto
     .createHash("sha256")
     .update(fingerprintInput)
@@ -511,7 +508,7 @@ function checkDeviceFingerprint(requestMeta) {
   return {
     score: Math.min(score, 100),
     flags,
-    data: { userAgent: userAgent?.slice(0, 100), ipAddress, fingerprint },
+    data: { userAgent: userAgent.slice(0, 100), ipAddress, fingerprint },
     fingerprint,
   };
 }
@@ -600,6 +597,12 @@ async function analyzeOrder(orderData, requestMeta = {}) {
 // ── Save analysis result to DB ────────────────────────────────────────────────
 async function saveAnalysis(order, analysisResult, requestMeta = {}) {
   try {
+    // Ensure we have order._id
+    if (!order || !order._id) {
+      console.error("❌ [FRAUD] Invalid order for saveAnalysis");
+      return null;
+    }
+
     const log = await FraudLog.findOneAndUpdate(
       { order: order._id },
       {
@@ -614,11 +617,12 @@ async function saveAnalysis(order, analysisResult, requestMeta = {}) {
         userAgent: requestMeta.userAgent?.slice(0, 200),
         autoAction: analysisResult.verdict === "blocked" ? "flagged" : "none",
       },
-      { upsert: true, new: true },
+      { upsert: true, new: true, runValidators: true },
     );
     return log;
   } catch (err) {
-    console.error("❌ [FRAUD] Failed to save analysis:", err.message);
+    console.error("❌ [FRAUD] Failed to save analysis:", err);
+    console.error("❌ Stack:", err.stack);
     return null;
   }
 }
