@@ -10,7 +10,7 @@ const router = express.Router();
 router.get(
   "/stats",
   protect,
-  authorize("admin", "super_admin"),
+  authorize("admin", "super_admin", "manager"),
   getDashboardStats,
 );
 router.get(
