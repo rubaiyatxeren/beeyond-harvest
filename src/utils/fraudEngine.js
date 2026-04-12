@@ -13,7 +13,7 @@ const crypto = require("crypto");
 const THRESHOLDS = {
   SAFE: 25,
   REVIEW: 55,
-  BLOCK: 55,
+  BLOCK: 70,
 };
 
 // ─── Signal Weights ────────────────────────────────────────────────────────────
