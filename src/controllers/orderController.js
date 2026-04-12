@@ -844,10 +844,13 @@ const createOrder = async (req, res) => {
     setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
 
     // ── FRAUD AUTO-ACTION ────────────────────────────────────────────────────────
+    // ── FRAUD AUTO-ACTION ────────────────────────────────────────────────────────
     let fraudAutoAction = "none";
 
-    if (fraudResult.verdict === "blocked" && fraudResult.riskScore >= 70) {
-      // Hard block (score 70+) — delete order and restore stock
+    if (fraudResult.verdict === "blocked") {
+      // ALL blocked orders should be cancelled, regardless of score
+      // The backend already sets BLOCK threshold at 55+, so any blocked order gets cancelled
+
       await Order.findByIdAndDelete(order._id);
 
       const restoreOps = items.map((item) => ({
@@ -859,7 +862,7 @@ const createOrder = async (req, res) => {
       await Product.bulkWrite(restoreOps);
 
       console.warn(
-        `🚫 [FRAUD] Order HARD BLOCKED & DELETED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+        `🚫 [FRAUD] Order BLOCKED & DELETED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
       );
 
       return res.status(422).json({
@@ -870,30 +873,18 @@ const createOrder = async (req, res) => {
       });
     }
 
-    if (fraudResult.verdict === "blocked" && fraudResult.riskScore < 70) {
-      // Medium block (score 56–69) — hold for manual review, don't delete
-      fraudAutoAction = "held";
-      await Order.findByIdAndUpdate(order._id, {
-        fraudAutoAction: "held",
-        adminNotes: `🔴 FRAUD HOLD (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
-      });
-      console.warn(
-        `🟠 [FRAUD] Order HELD for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
-      );
-    }
-
     if (fraudResult.verdict === "review") {
-      // Soft flag (score 26–55) — hold for manual review
+      // Soft flag (score 26–55) — hold for manual review, DO NOT delete
       fraudAutoAction = "held";
       await Order.findByIdAndUpdate(order._id, {
         fraudAutoAction: "held",
+        orderStatus: "pending", // Keep as pending for admin review
         adminNotes: `⚠️ FRAUD REVIEW (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
       });
       console.warn(
         `⚠️  [FRAUD] Order flagged for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
       );
     }
-    // ─────────────────────────────────────────────────────────────────────────────
 
     // ==============================
     // ✅ RESPONSE FIRST (FAST API)
