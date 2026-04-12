@@ -39,6 +39,20 @@ const productSchema = new mongoose.Schema(
       type: Number,
       min: [0, "Compare price cannot be negative"],
     },
+    // ── PROFIT TRACKING FIELDS ─────────────────────────────────────────────
+    costPerUnit: {
+      type: Number,
+      min: [0, "Cost per unit cannot be negative"],
+      default: 0,
+      comment: "Your actual purchase/production cost per unit (COGS)",
+    },
+    packagingCost: {
+      type: Number,
+      min: [0, "Packaging cost cannot be negative"],
+      default: 0,
+      comment: "Box, tape, label cost per unit",
+    },
+    // ──────────────────────────────────────────────────────────────────────
     costPerItem: {
       type: Number,
       min: [0, "Cost per item cannot be negative"],
@@ -99,7 +113,6 @@ const productSchema = new mongoose.Schema(
   },
 );
 
-// Create slug before saving
 productSchema.pre("save", function () {
   if (this.isModified("name") && !this.slug) {
     this.slug = this.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
