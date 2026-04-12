@@ -5,115 +5,75 @@ const ProfitSnapshot = require("../models/ProfitSnapshot");
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // ── Timezone-aware period bounds ──────────────────────────────────────────────
-const TIMEZONE_OFFSET_HOURS = 6; // Bangladesh is UTC+6
+const TIMEZONE_OFFSET_HOURS = 6; // Bangladesh UTC+6
 
 const getPeriodBounds = (period, date = new Date()) => {
-  // Adjust for local timezone so "today" means Bangladesh today, not UTC today
-  const localDate = new Date(
-    date.getTime() + TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000,
-  );
+  // Get the UTC timestamp of the local date boundaries
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+
+  // Helper: Convert local date components to UTC Date object correctly
+  const toUTCStartOfDay = (y, m, d) => {
+    // Create a date in local timezone, then convert to UTC midnight
+    const localDate = new Date(y, m, d, 0, 0, 0, 0);
+    // Return UTC timestamp of that local midnight
+    return new Date(
+      localDate.getTime() - TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000,
+    );
+  };
+
+  const toUTCEndOfDay = (y, m, d) => {
+    // Create a date in local timezone at end of day
+    const localDate = new Date(y, m, d, 23, 59, 59, 999);
+    // Return UTC timestamp of that local end-of-day
+    return new Date(
+      localDate.getTime() - TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000,
+    );
+  };
 
   if (period === "today") {
-    // Build start/end in UTC that correspond to Bangladesh midnight
-    const start = new Date(
-      Date.UTC(
-        localDate.getUTCFullYear(),
-        localDate.getUTCMonth(),
-        localDate.getUTCDate(),
-        0 - TIMEZONE_OFFSET_HOURS,
-        0,
-        0,
-        0, // shifts back to UTC
-      ),
-    );
-    const end = new Date(
-      Date.UTC(
-        localDate.getUTCFullYear(),
-        localDate.getUTCMonth(),
-        localDate.getUTCDate(),
-        23 - TIMEZONE_OFFSET_HOURS,
-        59,
-        59,
-        999,
-      ),
-    );
+    const start = toUTCStartOfDay(year, month, day);
+    const end = toUTCEndOfDay(year, month, day);
     console.log(
-      `[PROFIT] today BD: ${start.toISOString()} → ${end.toISOString()}`,
+      `[PROFIT] today: ${start.toISOString()} → ${end.toISOString()}`,
     );
     return { start, end };
   }
 
   if (period === "week") {
-    const dayOfWeek = localDate.getUTCDay();
-    const startOfWeek = new Date(
-      Date.UTC(
-        localDate.getUTCFullYear(),
-        localDate.getUTCMonth(),
-        localDate.getUTCDate() - dayOfWeek,
-        0 - TIMEZONE_OFFSET_HOURS,
-        0,
-        0,
-        0,
-      ),
+    // Get day of week (0 = Sunday)
+    let dayOfWeek = date.getDay();
+    // Calculate days to subtract to get to Monday (Monday = 1)
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+    const mondayDate = new Date(year, month, day - daysToMonday);
+    const sundayDate = new Date(year, month, day - daysToMonday + 6);
+
+    const start = toUTCStartOfDay(
+      mondayDate.getFullYear(),
+      mondayDate.getMonth(),
+      mondayDate.getDate(),
     );
-    const endOfWeek = new Date(
-      startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000 - 1,
+    const end = toUTCEndOfDay(
+      sundayDate.getFullYear(),
+      sundayDate.getMonth(),
+      sundayDate.getDate(),
     );
-    console.log(
-      `[PROFIT] week BD: ${startOfWeek.toISOString()} → ${endOfWeek.toISOString()}`,
-    );
-    return { start: startOfWeek, end: endOfWeek };
+
+    console.log(`[PROFIT] week: ${start.toISOString()} → ${end.toISOString()}`);
+    return { start, end };
   }
 
   if (period === "month") {
-    const start = new Date(
-      Date.UTC(
-        localDate.getUTCFullYear(),
-        localDate.getUTCMonth(),
-        1,
-        0 - TIMEZONE_OFFSET_HOURS,
-        0,
-        0,
-        0,
-      ),
-    );
-    const end = new Date(
-      Date.UTC(
-        localDate.getUTCFullYear(),
-        localDate.getUTCMonth() + 1,
-        0,
-        23 - TIMEZONE_OFFSET_HOURS,
-        59,
-        59,
-        999,
-      ),
-    );
+    const start = toUTCStartOfDay(year, month, 1);
+    const end = toUTCEndOfDay(year, month + 1, 0);
     return { start, end };
   }
 
   if (period === "year") {
-    const start = new Date(
-      Date.UTC(
-        localDate.getUTCFullYear(),
-        0,
-        1,
-        0 - TIMEZONE_OFFSET_HOURS,
-        0,
-        0,
-        0,
-      ),
-    );
-    const end = new Date(
-      Date.UTC(
-        localDate.getUTCFullYear(),
-        11,
-        31,
-        23 - TIMEZONE_OFFSET_HOURS,
-        59,
-        59,
-        999,
-      ),
-    );
+    const start = toUTCStartOfDay(year, 0, 1);
+    const end = toUTCEndOfDay(year, 11, 31);
     return { start, end };
   }
 
