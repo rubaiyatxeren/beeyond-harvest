@@ -1912,4 +1912,5 @@ module.exports = {
   sendManualOrderEmail,
   getAllCustomerEmails,
   sendBulkPromotionalEmail,
+  generateOrderEmailTemplate,
 };
