@@ -843,10 +843,13 @@ const createOrder = async (req, res) => {
     // Save log in background (non-blocking)
     setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
 
-    // Auto-cancel blocked orders
-    if (fraudResult.verdict === "blocked") {
+    // ── FRAUD AUTO-ACTION ────────────────────────────────────────────────────────
+    let fraudAutoAction = "none";
+
+    if (fraudResult.verdict === "blocked" && fraudResult.riskScore >= 70) {
+      // Hard block (score 70+) — delete order and restore stock
       await Order.findByIdAndDelete(order._id);
-      // Restore stock
+
       const restoreOps = items.map((item) => ({
         updateOne: {
           filter: { _id: item.product },
@@ -856,7 +859,7 @@ const createOrder = async (req, res) => {
       await Product.bulkWrite(restoreOps);
 
       console.warn(
-        `🚫 [FRAUD] Order BLOCKED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+        `🚫 [FRAUD] Order HARD BLOCKED & DELETED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
       );
 
       return res.status(422).json({
@@ -867,15 +870,30 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Flag review orders — create them but mark with a note
-    if (fraudResult.verdict === "review") {
+    if (fraudResult.verdict === "blocked" && fraudResult.riskScore < 70) {
+      // Medium block (score 56–69) — hold for manual review, don't delete
+      fraudAutoAction = "held";
       await Order.findByIdAndUpdate(order._id, {
-        adminNotes: `⚠️ FRAUD REVIEW REQUIRED — Score: ${fraudResult.riskScore} | Flags: ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
+        fraudAutoAction: "held",
+        adminNotes: `🔴 FRAUD HOLD (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
+      });
+      console.warn(
+        `🟠 [FRAUD] Order HELD for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+      );
+    }
+
+    if (fraudResult.verdict === "review") {
+      // Soft flag (score 26–55) — hold for manual review
+      fraudAutoAction = "held";
+      await Order.findByIdAndUpdate(order._id, {
+        fraudAutoAction: "held",
+        adminNotes: `⚠️ FRAUD REVIEW (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
       });
       console.warn(
         `⚠️  [FRAUD] Order flagged for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
       );
     }
+    // ─────────────────────────────────────────────────────────────────────────────
 
     // ==============================
     // ✅ RESPONSE FIRST (FAST API)
@@ -884,8 +902,8 @@ const createOrder = async (req, res) => {
       success: true,
       data: {
         ...order.toObject(),
-        fraudVerdict: fraudResult.verdict, // "safe" | "review" — never "blocked" (those are deleted above)
-        fraudAutoAction: fraudResult.autoAction, // "none" | "flagged" | "held"
+        fraudVerdict: fraudResult.verdict,
+        fraudAutoAction: fraudAutoAction, // ← now uses the local variable we set above
       },
       message: "Order created successfully",
       ...(fraudResult.verdict === "review" && {
