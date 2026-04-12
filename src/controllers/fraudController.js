@@ -1,6 +1,8 @@
 const Order = require("../models/Order");
 const FraudLog = require("../models/FraudLog");
 const { analyzeOrder, saveAnalysis } = require("../utils/fraudEngine");
+const { sendEmail } = require("../utils/emailService");
+const { generateOrderEmailTemplate } = require("./orderController");
 
 // ─── Helper: extract request metadata ────────────────────────────────────────
 const extractRequestMeta = (req) => ({
@@ -210,10 +212,43 @@ const reviewFraudLog = async (req, res) => {
 
     // If rejected, auto-cancel the order
     if (action === "rejected") {
-      await Order.findByIdAndUpdate(log.order, { orderStatus: "cancelled" });
+      const updatedOrder = await Order.findByIdAndUpdate(
+        log.order,
+        { orderStatus: "cancelled" },
+        { new: true }, // ← get the updated doc so we have customer email
+      );
+
       console.log(
         `🚫 [FRAUD] Order cancelled after fraud review: ${log.orderNumber}`,
       );
+
+      // Send cancellation email in background
+      if (updatedOrder && process.env.DISABLE_EMAIL !== "true") {
+        setImmediate(async () => {
+          try {
+            const result = await sendEmail(
+              updatedOrder.customer.email,
+              `❌ অর্ডার বাতিল হয়েছে — ${updatedOrder.orderNumber}`,
+              generateOrderEmailTemplate(updatedOrder, "status_update"),
+            );
+
+            if (result?.success) {
+              console.log(
+                `✅ [EMAIL] Fraud-cancel email sent → ${updatedOrder.customer.email}`,
+              );
+            } else {
+              console.error(
+                `❌ [EMAIL] Fraud-cancel email failed → ${updatedOrder.customer.email}: ${result?.error}`,
+              );
+            }
+          } catch (err) {
+            console.error(
+              "❌ [EMAIL] Fraud-cancel email crashed:",
+              err.message,
+            );
+          }
+        });
+      }
     }
 
     res.json({
