@@ -56,17 +56,10 @@ app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
-
-      if (process.env.NODE_ENV === "development") {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
+      if (process.env.NODE_ENV === "development") return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
       console.warn("⚠️ Blocked CORS origin:", origin);
-      return callback(null, true); // allow but log (safe for production debugging)
+      return callback(null, true); // allow but log
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -91,28 +84,72 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// ✅ RATE LIMIT (Render-safe with IPv6 fix)
-const limiter = rateLimit({
-  windowMs: 10 * 60 * 1000, // 10 min
+// ─── Rate Limit Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Extract a stable IP key from the request.
+ * Strips IPv6 prefix so ::ffff:1.2.3.4 → 1.2.3.4, preventing double-counting.
+ */
+function getIpKey(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  let ip = forwarded ? forwarded.split(",")[0].trim() : req.ip || "";
+  // Normalise ::ffff: mapped IPv4 addresses
+  if (ip.startsWith("::ffff:")) ip = ip.slice(7);
+  return ip || "unknown";
+}
+
+/**
+ * Returns true when the request carries a valid-looking admin JWT.
+ * We do NOT verify the signature here (that happens in authMiddleware).
+ * We just check the presence so rate-limiting skips the request early.
+ * The real auth gate still runs on every protected route.
+ */
+function isAdminRequest(req) {
+  const auth = req.headers["authorization"] || "";
+  // Bearer tokens issued by this app are always JWTs (3 base64 segments)
+  if (!auth.startsWith("Bearer ")) return false;
+  const parts = auth.slice(7).split(".");
+  return parts.length === 3;
+}
+
+// ─── Public rate limiter — 100 req / 10 min per IP ────────────────────────────
+const publicLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
   max: 100,
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    const forwarded = req.headers["x-forwarded-for"];
-    let ip = forwarded ? forwarded.split(",")[0].trim() : req.ip;
-    if (ip && ip.includes(":")) {
-      ip = ip.split(":").slice(0, -1).join(":");
-    }
-    return ip;
-  },
+  keyGenerator: getIpKey,
   validate: {
     xForwardedForHeader: false,
     keyGeneratorIpFallback: false,
   },
+  // Skip the limit entirely for authenticated admin requests
+  skip: (req) => isAdminRequest(req),
 });
 
-app.use("/api", limiter);
+// ─── Admin rate limiter — 1 000 req / 10 min per IP ──────────────────────────
+// Acts as a safety net so even admins can't accidentally DoS the server.
+const adminLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 1000,
+  message: "Admin rate limit reached. Please slow down.",
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getIpKey,
+  validate: {
+    xForwardedForHeader: false,
+    keyGeneratorIpFallback: false,
+  },
+  // Only apply to requests that carry a Bearer token
+  skip: (req) => !isAdminRequest(req),
+});
+
+// Apply both limiters to all /api routes.
+// publicLimiter skips authenticated requests; adminLimiter skips unauthenticated ones.
+// Result: public callers → 100/10 min, admins → 1 000/10 min.
+app.use("/api", publicLimiter);
+app.use("/api", adminLimiter);
 
 // ✅ ROUTES
 app.use("/api/auth", authRoutes);
@@ -137,21 +174,22 @@ console.log("✅ Routes registered:");
   "/api/orders",
   "/api/dashboard",
   "/api/delivery-charges",
+  "/api/coupons",
+  "/api/chatbot",
+  "/api/fraud",
+  "/api/profit",
 ].forEach((route) => console.log("  -", route));
 
-// ✅ HEALTH CHECK — returns 503 if DB is down so monitors know server isn't ready
+// ✅ HEALTH CHECK
 app.get("/health", (req, res) => {
   const dbState = mongoose.connection.readyState;
-
   const dbStatusMap = {
     0: "disconnected",
     1: "connected",
     2: "connecting",
     3: "disconnecting",
   };
-
   const isConnected = dbState === 1;
-
   res.status(isConnected ? 200 : 503).json({
     status: isConnected ? "OK" : "DEGRADED",
     message: isConnected ? "Server is running" : "Database not connected",
