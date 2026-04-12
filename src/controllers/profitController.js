@@ -4,42 +4,116 @@ const ProfitSnapshot = require("../models/ProfitSnapshot");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// ── Timezone-aware period bounds ──────────────────────────────────────────────
+const TIMEZONE_OFFSET_HOURS = 6; // Bangladesh is UTC+6
+
 const getPeriodBounds = (period, date = new Date()) => {
+  // Adjust for local timezone so "today" means Bangladesh today, not UTC today
+  const localDate = new Date(
+    date.getTime() + TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000,
+  );
+
   if (period === "today") {
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(date);
-    end.setHours(23, 59, 59, 999);
+    // Build start/end in UTC that correspond to Bangladesh midnight
+    const start = new Date(
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        localDate.getUTCMonth(),
+        localDate.getUTCDate(),
+        0 - TIMEZONE_OFFSET_HOURS,
+        0,
+        0,
+        0, // shifts back to UTC
+      ),
+    );
+    const end = new Date(
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        localDate.getUTCMonth(),
+        localDate.getUTCDate(),
+        23 - TIMEZONE_OFFSET_HOURS,
+        59,
+        59,
+        999,
+      ),
+    );
+    console.log(
+      `[PROFIT] today BD: ${start.toISOString()} → ${end.toISOString()}`,
+    );
     return { start, end };
   }
 
   if (period === "week") {
-    const start = new Date(date);
-    start.setDate(date.getDate() - date.getDay());
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    end.setHours(23, 59, 59, 999);
-    return { start, end };
+    const dayOfWeek = localDate.getUTCDay();
+    const startOfWeek = new Date(
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        localDate.getUTCMonth(),
+        localDate.getUTCDate() - dayOfWeek,
+        0 - TIMEZONE_OFFSET_HOURS,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfWeek = new Date(
+      startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000 - 1,
+    );
+    console.log(
+      `[PROFIT] week BD: ${startOfWeek.toISOString()} → ${endOfWeek.toISOString()}`,
+    );
+    return { start: startOfWeek, end: endOfWeek };
   }
 
   if (period === "month") {
-    const start = new Date(date.getFullYear(), date.getMonth(), 1);
+    const start = new Date(
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        localDate.getUTCMonth(),
+        1,
+        0 - TIMEZONE_OFFSET_HOURS,
+        0,
+        0,
+        0,
+      ),
+    );
     const end = new Date(
-      date.getFullYear(),
-      date.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999,
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        localDate.getUTCMonth() + 1,
+        0,
+        23 - TIMEZONE_OFFSET_HOURS,
+        59,
+        59,
+        999,
+      ),
     );
     return { start, end };
   }
 
   if (period === "year") {
-    const start = new Date(date.getFullYear(), 0, 1);
-    const end = new Date(date.getFullYear(), 11, 31, 23, 59, 59, 999);
+    const start = new Date(
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        0,
+        1,
+        0 - TIMEZONE_OFFSET_HOURS,
+        0,
+        0,
+        0,
+      ),
+    );
+    const end = new Date(
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        11,
+        31,
+        23 - TIMEZONE_OFFSET_HOURS,
+        59,
+        59,
+        999,
+      ),
+    );
     return { start, end };
   }
 
