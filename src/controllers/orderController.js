@@ -882,9 +882,12 @@ const createOrder = async (req, res) => {
     // ==============================
     res.status(201).json({
       success: true,
-      data: order,
+      data: {
+        ...order.toObject(),
+        fraudVerdict: fraudResult.verdict, // "safe" | "review" — never "blocked" (those are deleted above)
+        fraudAutoAction: fraudResult.autoAction, // "none" | "flagged" | "held"
+      },
       message: "Order created successfully",
-      // only expose verdict to client (not the full score/flags)
       ...(fraudResult.verdict === "review" && {
         warning: "অর্ডারটি রিভিউয়ের অপেক্ষায় রয়েছে।",
       }),
@@ -1295,10 +1298,37 @@ const getOrdersByPhone = async (req, res) => {
       `✅ [PHONE SEARCH] Found ${sanitizedOrders.length} orders for ${cleanPhone}`,
     );
 
+    // ── Attach fraud verdict to each order ───────────────────
+    let ordersWithFraud = sanitizedOrders;
+    try {
+      const FraudLog = require("../models/FraudLog");
+      const orderIds = sanitizedOrders.map((o) => o._id);
+      const fraudLogs = await FraudLog.find({ order: { $in: orderIds } })
+        .select("order verdict autoAction")
+        .lean();
+
+      const fraudMap = {};
+      fraudLogs.forEach((f) => {
+        fraudMap[String(f.order)] = {
+          fraudVerdict: f.verdict,
+          fraudAutoAction: f.autoAction,
+        };
+      });
+
+      ordersWithFraud = sanitizedOrders.map((o) => ({
+        ...o,
+        ...(fraudMap[String(o._id)] || {}),
+      }));
+    } catch (fraudErr) {
+      // Non-critical — return orders without fraud data rather than failing
+      console.warn("⚠️ [PHONE SEARCH] Fraud lookup skipped:", fraudErr.message);
+    }
+    // ─────────────────────────────────────────────────────────
+
     res.json({
       success: true,
-      count: sanitizedOrders.length,
-      data: sanitizedOrders,
+      count: ordersWithFraud.length,
+      data: ordersWithFraud,
     });
   } catch (error) {
     console.error("❌ [PHONE SEARCH] Error:", error.message);
