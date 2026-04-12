@@ -158,11 +158,8 @@ const syncAllProfit = async (req, res) => {
   try {
     console.log("🔄 [PROFIT] Starting bulk sync...");
 
-    // Find orders without snapshots
-    const existingSnapshots = await ProfitSnapshot.distinct("order");
-    const ordersToSync = await Order.find({
-      _id: { $nin: existingSnapshots },
-    }).lean();
+    // ✅ CHANGED: sync ALL orders, not just ones without snapshots
+    const ordersToSync = await Order.find({}).lean();
 
     console.log(`📦 [PROFIT] ${ordersToSync.length} orders to sync`);
 
@@ -172,7 +169,12 @@ const syncAllProfit = async (req, res) => {
     for (const order of ordersToSync) {
       try {
         const snapshot = await buildSnapshot(order);
-        await ProfitSnapshot.create(snapshot);
+        // ✅ upsert: updates existing snapshots with corrected dates
+        await ProfitSnapshot.findOneAndUpdate({ order: order._id }, snapshot, {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        });
         synced++;
       } catch (err) {
         console.error(
