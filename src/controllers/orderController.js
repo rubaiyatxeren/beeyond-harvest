@@ -844,12 +844,10 @@ const createOrder = async (req, res) => {
     setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
 
     // ── FRAUD AUTO-ACTION ────────────────────────────────────────────────────────
-    // ── FRAUD AUTO-ACTION ────────────────────────────────────────────────────────
     let fraudAutoAction = "none";
 
-    // HARD BLOCK: Score >= 55 (matching engine's BLOCK threshold)
-    if (fraudResult.verdict === "blocked" && fraudResult.riskScore >= 55) {
-      // Hard delete order and restore stock
+    if (fraudResult.verdict === "blocked" && fraudResult.riskScore >= 70) {
+      // Hard block (score 70+) — delete order and restore stock
       await Order.findByIdAndDelete(order._id);
 
       const restoreOps = items.map((item) => ({
@@ -872,18 +870,27 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // REVIEW FLAG: Score 30-54 (review threshold from engine)
-    if (
-      fraudResult.verdict === "review" ||
-      (fraudResult.riskScore >= 30 && fraudResult.riskScore < 55)
-    ) {
+    if (fraudResult.verdict === "blocked" && fraudResult.riskScore < 70) {
+      // Medium block (score 56–69) — hold for manual review, don't delete
+      fraudAutoAction = "held";
+      await Order.findByIdAndUpdate(order._id, {
+        fraudAutoAction: "held",
+        adminNotes: `🔴 FRAUD HOLD (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
+      });
+      console.warn(
+        `🟠 [FRAUD] Order HELD for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+      );
+    }
+
+    if (fraudResult.verdict === "review") {
+      // Soft flag (score 26–55) — hold for manual review
       fraudAutoAction = "held";
       await Order.findByIdAndUpdate(order._id, {
         fraudAutoAction: "held",
         adminNotes: `⚠️ FRAUD REVIEW (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
       });
       console.warn(
-        `⚠️ [FRAUD] Order flagged for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+        `⚠️  [FRAUD] Order flagged for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
       );
     }
     // ─────────────────────────────────────────────────────────────────────────────
