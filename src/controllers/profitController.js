@@ -5,18 +5,17 @@ const ProfitSnapshot = require("../models/ProfitSnapshot");
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const getPeriodBounds = (period, date = new Date()) => {
-  const d = new Date(date);
-
   if (period === "today") {
-    const start = new Date(d.setHours(0, 0, 0, 0));
-    const end = new Date(d.setHours(23, 59, 59, 999));
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(date);
+    end.setHours(23, 59, 59, 999);
     return { start, end };
   }
 
   if (period === "week") {
-    const day = d.getDay(); // 0=Sun
-    const start = new Date(d);
-    start.setDate(d.getDate() - day);
+    const start = new Date(date);
+    start.setDate(date.getDate() - date.getDay());
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
@@ -25,18 +24,25 @@ const getPeriodBounds = (period, date = new Date()) => {
   }
 
   if (period === "month") {
-    const start = new Date(d.getFullYear(), d.getMonth(), 1);
-    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+    const start = new Date(date.getFullYear(), date.getMonth(), 1);
+    const end = new Date(
+      date.getFullYear(),
+      date.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999,
+    );
     return { start, end };
   }
 
   if (period === "year") {
-    const start = new Date(d.getFullYear(), 0, 1);
-    const end = new Date(d.getFullYear(), 11, 31, 23, 59, 59, 999);
+    const start = new Date(date.getFullYear(), 0, 1);
+    const end = new Date(date.getFullYear(), 11, 31, 23, 59, 59, 999);
     return { start, end };
   }
 
-  // custom: expects { start, end } passed directly
   return null;
 };
 
