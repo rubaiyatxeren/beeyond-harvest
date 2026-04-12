@@ -70,7 +70,28 @@ router.get("/track/:orderNumber", async (req, res) => {
       });
     }
 
-    res.json({ success: true, data: order });
+    // ── Attach fraud verdict (non-blocking) ──────────────────
+    let fraudData = {};
+    try {
+      const fraudLog = await FraudLog.findOne({
+        orderNumber: order.orderNumber,
+      })
+        .select("verdict autoAction reviewAction")
+        .lean();
+
+      if (fraudLog) {
+        fraudData = {
+          fraudVerdict: fraudLog.verdict,
+          fraudAutoAction: fraudLog.autoAction,
+          fraudReviewed: fraudLog.reviewAction,
+        };
+      }
+    } catch (fraudErr) {
+      console.warn("⚠️ [TRACK] Fraud lookup skipped:", fraudErr.message);
+    }
+    // ─────────────────────────────────────────────────────────
+
+    res.json({ success: true, data: { ...order.toObject(), ...fraudData } });
   } catch (error) {
     console.error("TRACK ERROR:", error);
     res.status(500).json({ success: false, message: error.message });
