@@ -13,7 +13,7 @@ const crypto = require("crypto");
 const THRESHOLDS = {
   SAFE: 25,
   REVIEW: 55,
-  BLOCK: 55,
+  BLOCK: 65, // raise above the single-critical floor of 60
 };
 
 // ─── Signal Weights ────────────────────────────────────────────────────────────
@@ -949,7 +949,8 @@ async function analyzeOrder(rawOrderData, requestMeta = {}) {
   } else if (criticalFlags.length >= 2) {
     effectiveScore = Math.max(riskScore, 70);
   } else if (hasCritical) {
-    effectiveScore = Math.max(riskScore, 60);
+    effectiveScore = Math.max(riskScore, 56);
+    ("blocked");
   }
 
   // Verdict
