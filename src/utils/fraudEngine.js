@@ -663,7 +663,7 @@ function checkAddressRisk(orderData) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SIGNAL 5: PAYMENT BEHAVIOR (enhanced)
+// SIGNAL 5: PAYMENT BEHAVIOR (enhanced with aggressive cancellation scoring)
 // ══════════════════════════════════════════════════════════════════════════════
 async function checkPaymentBehavior(orderData) {
   const { customer, paymentMethod, total } = orderData;
@@ -687,55 +687,182 @@ async function checkPaymentBehavior(orderData) {
     }
   }
 
-  // Bad order history by phone
-  let badHistory = 0;
-  let totalOrdersByPhone = 0;
-  if (customer.phone) {
-    const [cancelled, totalOrders] = await Promise.all([
-      Order.countDocuments({
-        "customer.phone": customer.phone,
-        orderStatus: { $in: ["cancelled", "returned"] },
-      }),
-      Order.countDocuments({ "customer.phone": customer.phone }),
-    ]);
-    badHistory = cancelled;
-    totalOrdersByPhone = totalOrders;
+  // ============================================================
+  // 🔥 AGGRESSIVE CANCELLATION/RETURN SCORING
+  // ============================================================
 
-    if (badHistory >= 5) {
+  // Get detailed cancellation history by phone
+  let cancellationDetails = {
+    count: 0,
+    recentCount: 0,
+    totalSpent: 0,
+    orderCount: 0,
+  };
+  if (customer.phone) {
+    const cleanPhone = customer.phone.replace(/\D/g, "");
+
+    // Get all orders for this phone with detailed info
+    const phoneOrders = await Order.find({
+      "customer.phone": { $regex: cleanPhone, $options: "i" },
+    })
+      .select("orderStatus total createdAt")
+      .lean();
+
+    cancellationDetails.orderCount = phoneOrders.length;
+    cancellationDetails.totalSpent = phoneOrders.reduce(
+      (sum, o) => sum + (o.total || 0),
+      0,
+    );
+
+    // Count cancelled/returned orders
+    const cancelledOrders = phoneOrders.filter(
+      (o) => o.orderStatus === "cancelled" || o.orderStatus === "returned",
+    );
+    cancellationDetails.count = cancelledOrders.length;
+
+    // Count recent cancellations (last 30 days)
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    cancellationDetails.recentCount = cancelledOrders.filter(
+      (o) => new Date(o.createdAt) >= thirtyDaysAgo,
+    ).length;
+
+    // Calculate cancellation rate
+    const cancellationRate =
+      cancellationDetails.orderCount > 0
+        ? cancellationDetails.count / cancellationDetails.orderCount
+        : 0;
+
+    // ─── SCORING BASED ON CANCELLATION COUNT ─────────────────
+
+    // Even 1 cancellation is bad (especially for new customers)
+    if (cancellationDetails.count >= 5) {
+      score += 70;
+      flags.push(
+        `🔴 EXTREME: ${cancellationDetails.count} cancelled/returned orders - habitual abuser`,
+      );
+    } else if (cancellationDetails.count >= 3) {
       score += 55;
       flags.push(
-        `Phone has ${badHistory} cancelled/returned orders — high risk history`,
+        `🔴 HIGH: ${cancellationDetails.count} cancelled/returned orders - repeat offender`,
       );
-    } else if (badHistory >= 3) {
+    } else if (cancellationDetails.count >= 2) {
       score += 40;
-      flags.push(`Phone has ${badHistory} cancelled/returned orders`);
-    } else if (badHistory >= 1) {
-      score += 15;
       flags.push(
-        `Phone has ${badHistory} previous cancelled/returned order(s)`,
+        `⚠️ SIGNIFICANT: ${cancellationDetails.count} cancelled/returned orders`,
+      );
+    } else if (cancellationDetails.count === 1) {
+      score += 25;
+      flags.push(`⚠️ 1 cancelled/returned order in history`);
+    }
+
+    // ─── RECENCY MATTERS (recent cancellations are worse) ────
+    if (cancellationDetails.recentCount >= 2) {
+      score += 30;
+      flags.push(
+        `🔥 ${cancellationDetails.recentCount} cancellations in last 30 days - very recent`,
+      );
+    } else if (cancellationDetails.recentCount === 1) {
+      score += 15;
+      flags.push(`⚠️ Recent cancellation within 30 days`);
+    }
+
+    // ─── HIGH CANCELLATION RATE (even with few orders) ───────
+    if (cancellationDetails.orderCount >= 2 && cancellationRate >= 0.5) {
+      score += 35;
+      flags.push(
+        `📊 ${Math.round(cancellationRate * 100)}% cancellation rate (${cancellationDetails.count}/${cancellationDetails.orderCount} orders)`,
+      );
+    } else if (
+      cancellationDetails.orderCount >= 1 &&
+      cancellationRate === 1.0
+    ) {
+      // 100% cancellation rate (all orders cancelled)
+      score += 45;
+      flags.push(
+        `🚫 100% cancellation rate - all ${cancellationDetails.orderCount} orders cancelled`,
       );
     }
 
-    // High cancellation rate
-    if (totalOrdersByPhone >= 3 && badHistory / totalOrdersByPhone >= 0.6) {
-      score += 25;
+    // ─── HIGH VALUE CANCELLATIONS (fraud pattern) ────────────
+    const cancelledHighValue = phoneOrders.filter(
+      (o) =>
+        (o.orderStatus === "cancelled" || o.orderStatus === "returned") &&
+        o.total > 5000,
+    );
+    if (cancelledHighValue.length >= 1) {
+      const additionalScore = Math.min(cancelledHighValue.length * 15, 45);
+      score += additionalScore;
       flags.push(
-        `High cancellation rate: ${Math.round((badHistory / totalOrdersByPhone) * 100)}% of orders cancelled`,
+        `💰 ${cancelledHighValue.length} high-value cancellation(s) (>৳5,000)`,
       );
     }
   }
 
-  // Bad order history by email
+  // Bad order history by email (cross-reference)
   let badHistoryEmail = 0;
+  let emailCancellationDetails = { count: 0, recentCount: 0 };
   if (customer.email) {
-    badHistoryEmail = await Order.countDocuments({
-      "customer.email": customer.email,
-      orderStatus: { $in: ["cancelled", "returned"] },
-    });
-    if (badHistoryEmail >= 3 && badHistoryEmail > badHistory) {
-      score += 25;
-      flags.push(`Email has ${badHistoryEmail} cancelled/returned orders`);
+    const emailOrders = await Order.find({
+      "customer.email": customer.email.toLowerCase(),
+    })
+      .select("orderStatus createdAt")
+      .lean();
+
+    const cancelledEmails = emailOrders.filter(
+      (o) => o.orderStatus === "cancelled" || o.orderStatus === "returned",
+    );
+    badHistoryEmail = cancelledEmails.length;
+    emailCancellationDetails.count = cancelledEmails.length;
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    emailCancellationDetails.recentCount = cancelledEmails.filter(
+      (o) => new Date(o.createdAt) >= thirtyDaysAgo,
+    ).length;
+
+    // Score email cancellations (slightly lower weight than phone)
+    if (badHistoryEmail >= 3) {
+      score += 35;
+      flags.push(`📧 Email has ${badHistoryEmail} cancelled/returned orders`);
+    } else if (
+      badHistoryEmail >= 1 &&
+      badHistoryEmail > (cancellationDetails.count || 0)
+    ) {
+      // If email has cancellations but phone doesn't (suspicious)
+      score += 20;
+      flags.push(
+        `📧 Email has ${badHistoryEmail} cancellation(s) - potential account switching`,
+      );
+    } else if (badHistoryEmail === 1) {
+      score += 10;
+      flags.push(`📧 Email has 1 cancelled/returned order`);
     }
+  }
+
+  // ─── CROSS-CHECK: Phone and email don't match history (account switching) ───
+  if (customer.phone && customer.email) {
+    const phoneHasHistory = cancellationDetails.count > 0;
+    const emailHasHistory = badHistoryEmail > 0;
+
+    // Phone has clean history but email has bad history = suspicious
+    if (
+      !phoneHasHistory &&
+      emailHasHistory &&
+      emailCancellationDetails.recentCount > 0
+    ) {
+      score += 30;
+      flags.push(
+        `🔄 Account switching detected - clean phone but email has ${badHistoryEmail} cancellation(s)`,
+      );
+    }
+  }
+
+  // ─── FIRST ORDER WITH PREVIOUS CANCELLATIONS ─────────────────
+  if (cancellationDetails.orderCount === 0 && badHistoryEmail > 0) {
+    // New customer (by phone) but email has cancellations
+    score += 25;
+    flags.push(
+      `⚠️ First order from this phone, but email has ${badHistoryEmail} previous cancellation(s)`,
+    );
   }
 
   // Multiple payment methods (card testing)
@@ -756,11 +883,16 @@ async function checkPaymentBehavior(orderData) {
     }
   }
 
+  // First order with existing cancellation history
+  if (cancellationDetails.orderCount === 0 && cancellationDetails.count > 0) {
+    // This shouldn't happen, but just in case
+  }
+
   // First order with very high COD value (no purchase history = higher risk)
   if (
     paymentMethod === "cash_on_delivery" &&
     total > 3000 &&
-    totalOrdersByPhone === 0
+    cancellationDetails.orderCount === 0
   ) {
     score += 12;
     flags.push("First-time customer with high-value COD order");
@@ -769,7 +901,22 @@ async function checkPaymentBehavior(orderData) {
   return {
     score: Math.min(score, 100),
     flags,
-    data: { paymentMethod, total, badHistory, distinctMethods },
+    data: {
+      paymentMethod,
+      total,
+      badHistory: cancellationDetails.count,
+      badHistoryEmail,
+      cancellationRate:
+        cancellationDetails.orderCount > 0
+          ? Math.round(
+              (cancellationDetails.count / cancellationDetails.orderCount) *
+                100,
+            )
+          : 0,
+      recentCancellations: cancellationDetails.recentCount,
+      totalOrders: cancellationDetails.orderCount,
+      totalSpent: cancellationDetails.totalSpent,
+    },
   };
 }
 
@@ -936,7 +1083,12 @@ async function analyzeOrder(rawOrderData, requestMeta = {}) {
     ),
     ...velocityResult.flags.filter((f) => f.includes("1min")),
     ...paymentResult.flags.filter(
-      (f) => f.includes("high risk history") || f.includes("card testing"),
+      (f) =>
+        f.includes("high risk history") ||
+        f.includes("card testing") ||
+        f.includes("cancelled/returned") || // ← ADD THIS
+        f.includes("cancellation") || // ← ADD THIS
+        f.includes("100% cancellation"), // ← ADD THIS
     ),
   ];
 
