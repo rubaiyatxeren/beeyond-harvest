@@ -133,7 +133,6 @@ const getFraudLogs = async (req, res) => {
     if (req.query.reviewAction === "pending") query.reviewAction = null;
     else if (req.query.reviewAction)
       query.reviewAction = req.query.reviewAction;
-    if (req.query.autoAction) query.autoAction = req.query.autoAction;
 
     if (req.query.minScore)
       query.riskScore = { $gte: parseInt(req.query.minScore) };
