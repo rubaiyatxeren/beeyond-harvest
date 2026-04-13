@@ -840,14 +840,13 @@ const createOrder = async (req, res) => {
       requestMeta,
     );
 
-    // Save log in background (non-blocking)
-    setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
-
     // ── FRAUD AUTO-ACTION ────────────────────────────────────────────────────────
     let fraudAutoAction = "none";
 
     if (fraudResult.verdict === "blocked" && fraudResult.riskScore >= 70) {
-      // Hard block (score 70+) — delete order and restore stock
+      // Hard block (score 70+) — save log FIRST (audit trail), then delete order
+      await saveAnalysis(order, fraudResult, requestMeta);
+
       await Order.findByIdAndDelete(order._id);
 
       const restoreOps = items.map((item) => ({
@@ -869,6 +868,9 @@ const createOrder = async (req, res) => {
         code: "ORDER_FRAUD_BLOCKED",
       });
     }
+
+    // Save log in background for non-hard-block cases
+    setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
 
     // AFTER
     if (fraudResult.verdict === "blocked" && fraudResult.riskScore < 70) {
