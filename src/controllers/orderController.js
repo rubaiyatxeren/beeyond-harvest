@@ -840,21 +840,16 @@ const createOrder = async (req, res) => {
       requestMeta,
     );
 
+    // Save log in background (non-blocking)
+    setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
+
     // ── FRAUD AUTO-ACTION ────────────────────────────────────────────────────────
     let fraudAutoAction = "none";
 
     if (fraudResult.verdict === "blocked" && fraudResult.riskScore >= 70) {
-      // Hard block (score 70+) — save log FIRST (audit trail), then delete order
-      await saveAnalysis(order, fraudResult, requestMeta);
+      // Hard block (score 70+) — delete order and restore stock
+      await Order.findByIdAndDelete(order._id);
 
-      // REPLACE with soft-cancel instead of delete:
-      await Order.findByIdAndUpdate(order._id, {
-        orderStatus: "cancelled",
-        fraudAutoAction: "blocked",
-        adminNotes: `🚫 FRAUD HARD BLOCKED (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
-      });
-
-      // Still restore stock
       const restoreOps = items.map((item) => ({
         updateOne: {
           filter: { _id: item.product },
@@ -862,6 +857,10 @@ const createOrder = async (req, res) => {
         },
       }));
       await Product.bulkWrite(restoreOps);
+
+      console.warn(
+        `🚫 [FRAUD] Order HARD BLOCKED & DELETED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+      );
 
       return res.status(422).json({
         success: false,
@@ -871,20 +870,15 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Save log in background for non-hard-block cases
-    setImmediate(() => saveAnalysis(order, fraudResult, requestMeta));
-
-    // AFTER
     if (fraudResult.verdict === "blocked" && fraudResult.riskScore < 70) {
-      // Medium block (score 56–69) — auto-cancel, no delete (keeps audit trail)
-      fraudAutoAction = "rejected";
+      // Medium block (score 56–69) — hold for manual review, don't delete
+      fraudAutoAction = "held";
       await Order.findByIdAndUpdate(order._id, {
-        orderStatus: "cancelled",
-        fraudAutoAction: "rejected",
-        adminNotes: `🔴 FRAUD AUTO-REJECTED (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
+        fraudAutoAction: "held",
+        adminNotes: `🔴 FRAUD HOLD (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
       });
       console.warn(
-        `🟠 [FRAUD] Order AUTO-REJECTED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
+        `🟠 [FRAUD] Order HELD for review: ${order.orderNumber} | score=${fraudResult.riskScore}`,
       );
     }
 
@@ -904,20 +898,16 @@ const createOrder = async (req, res) => {
     // ==============================
     // ✅ RESPONSE FIRST (FAST API)
     // ==============================
-    // AFTER
     res.status(201).json({
       success: true,
       data: {
         ...order.toObject(),
         fraudVerdict: fraudResult.verdict,
-        fraudAutoAction,
+        fraudAutoAction: fraudAutoAction, // ← now uses the local variable we set above
       },
       message: "Order created successfully",
       ...(fraudResult.verdict === "review" && {
         warning: "অর্ডারটি রিভিউয়ের অপেক্ষায় রয়েছে।",
-      }),
-      ...(fraudAutoAction === "rejected" && {
-        warning: "অর্ডারটি স্বয়ংক্রিয়ভাবে বাতিল হয়েছে।",
       }),
     });
 
