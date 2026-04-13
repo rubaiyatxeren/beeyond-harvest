@@ -1010,12 +1010,15 @@ async function saveAnalysis(order, analysisResult, requestMeta = {}) {
         fingerprint: analysisResult.fingerprint,
         ipAddress: requestMeta.ipAddress,
         userAgent: requestMeta.userAgent?.slice(0, 200),
+        // AFTER
         autoAction:
-          analysisResult.verdict === "blocked"
-            ? "flagged"
-            : analysisResult.verdict === "review"
-              ? "held"
-              : "none",
+          analysisResult.verdict === "blocked" && analysisResult.riskScore >= 70
+            ? "blocked"
+            : analysisResult.verdict === "blocked"
+              ? "rejected"
+              : analysisResult.verdict === "review"
+                ? "held"
+                : "none",
       },
       { upsert: true, new: true, runValidators: true },
     );
