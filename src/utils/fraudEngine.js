@@ -12,7 +12,7 @@ const crypto = require("crypto");
 // ─── Thresholds ────────────────────────────────────────────────────────────────
 const THRESHOLDS = {
   SAFE: 25,
-  REVIEW: 30, // was 55 — now scores 26-54 go to review
+  REVIEW: 55,
   BLOCK: 55,
 };
 
@@ -997,11 +997,6 @@ async function saveAnalysis(order, analysisResult, requestMeta = {}) {
     if (!order?._id) {
       console.error("❌ [FRAUD] saveAnalysis called with invalid order");
       return null;
-    }
-
-    const existing = await FraudLog.findOne({ order: order._id });
-    if (existing?.reviewAction) {
-      return existing; // don't overwrite logs already reviewed by admin
     }
     const log = await FraudLog.findOneAndUpdate(
       { order: order._id },
