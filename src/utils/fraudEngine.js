@@ -11,9 +11,9 @@ const crypto = require("crypto");
 
 // ─── Thresholds ────────────────────────────────────────────────────────────────
 const THRESHOLDS = {
-  SAFE: 25,
-  REVIEW: 55,
-  BLOCK: 65, // raise above the single-critical floor of 60
+  SAFE: 30,
+  REVIEW: 60, // Changed from 55 to 60
+  BLOCK: 70, // Changed from 65 to 81 (gives more room for review)
 };
 
 // ─── Signal Weights ────────────────────────────────────────────────────────────
@@ -945,19 +945,23 @@ async function analyzeOrder(rawOrderData, requestMeta = {}) {
   // Multiple critical flags = higher floor score
   let effectiveScore = riskScore;
   if (criticalFlags.length >= 3) {
-    effectiveScore = Math.max(riskScore, 80);
+    effectiveScore = Math.max(riskScore, 75); // Changed from 80
   } else if (criticalFlags.length >= 2) {
-    effectiveScore = Math.max(riskScore, 70);
+    effectiveScore = Math.max(riskScore, 65); // Changed from 70
   } else if (hasCritical) {
-    effectiveScore = Math.max(riskScore, 56);
-    ("blocked");
+    effectiveScore = Math.max(riskScore, 50); // Changed from 56 to 50
   }
 
   // Verdict
   let verdict;
-  if (effectiveScore <= THRESHOLDS.SAFE) verdict = "safe";
-  else if (effectiveScore <= THRESHOLDS.REVIEW) verdict = "review";
-  else verdict = "blocked";
+  if (effectiveScore <= THRESHOLDS.SAFE) {
+    verdict = "safe";
+  } else if (effectiveScore < THRESHOLDS.REVIEW) {
+    // Note: < not <=
+    verdict = "review";
+  } else {
+    verdict = "blocked";
+  }
 
   const allFlags = [
     ...velocityResult.flags,
