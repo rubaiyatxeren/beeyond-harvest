@@ -847,8 +847,14 @@ const createOrder = async (req, res) => {
       // Hard block (score 70+) — save log FIRST (audit trail), then delete order
       await saveAnalysis(order, fraudResult, requestMeta);
 
-      await Order.findByIdAndDelete(order._id);
+      // REPLACE with soft-cancel instead of delete:
+      await Order.findByIdAndUpdate(order._id, {
+        orderStatus: "cancelled",
+        fraudAutoAction: "blocked",
+        adminNotes: `🚫 FRAUD HARD BLOCKED (score ${fraudResult.riskScore}) — ${fraudResult.allFlags.slice(0, 3).join("; ")}`,
+      });
 
+      // Still restore stock
       const restoreOps = items.map((item) => ({
         updateOne: {
           filter: { _id: item.product },
@@ -856,10 +862,6 @@ const createOrder = async (req, res) => {
         },
       }));
       await Product.bulkWrite(restoreOps);
-
-      console.warn(
-        `🚫 [FRAUD] Order HARD BLOCKED & DELETED: ${order.orderNumber} | score=${fraudResult.riskScore}`,
-      );
 
       return res.status(422).json({
         success: false,
