@@ -16,6 +16,6 @@ router.post("/events", ingestEvents);
 router.get("/sessions", protect, getSessions);
 router.get("/sessions/:sessionId", protect, getSessionDetail);
 router.get("/stats", protect, getStats);
-router.patch("/sessions/:sessionId/link", protect, linkSession);
+router.patch("/sessions/:sessionId/link", linkSession);
 
 module.exports = router;
