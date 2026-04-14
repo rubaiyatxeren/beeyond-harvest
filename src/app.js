@@ -18,6 +18,7 @@ const couponRoutes = require("./routes/couponRoutes");
 const chatbotRoutes = require("./routes/chatbotRoutes");
 const fraudRoutes = require("./routes/fraudRoutes");
 const profitRoutes = require("./routes/profitRoutes");
+const trackRoutes = require("./routes/trackRoutes");
 
 const app = express();
 
@@ -163,6 +164,7 @@ app.use("/api/coupons", couponRoutes);
 app.use("/api/chatbot", chatbotRoutes);
 app.use("/api/fraud", fraudRoutes);
 app.use("/api/profit", profitRoutes);
+app.use("/api/track", trackRoutes);
 
 // ✅ DEBUG ROUTE LIST
 console.log("✅ Routes registered:");
