@@ -19,7 +19,7 @@ function parseUA(uaString) {
 }
 
 // ─── POST /api/track/events ───────────────────────────────────
-// Body: { sessionId, visitorId, device, events[] }
+// Replace your ingestEvents function with this fixed version:
 const ingestEvents = async (req, res) => {
   try {
     const { sessionId, visitorId, device, events } = req.body;
@@ -36,6 +36,13 @@ const ingestEvents = async (req, res) => {
 
     const parsed = parseUA(device?.userAgent || "");
 
+    // Calculate new page count properly
+    const pageViewCount = events.filter((e) => e.type === "page_view").length;
+
+    // Get existing session to calculate page count increment
+    const existingSession = await TrackerSession.findOne({ sessionId });
+    const currentPageCount = existingSession?.pageCount || 0;
+
     await TrackerSession.findOneAndUpdate(
       { sessionId },
       {
@@ -48,42 +55,30 @@ const ingestEvents = async (req, res) => {
             ...device,
             ...parsed,
           },
+          pageCount: 0,
+          eventCount: 0,
         },
         $push: { events: { $each: events } },
-        $inc: { eventCount: events.length },
+        $inc: {
+          eventCount: events.length,
+          pageCount: pageViewCount,
+        },
         $set: {
-          lastSeen: new Date(),
-          // Count page_view events
-          pageCount: await TrackerSession.aggregate([
-            { $match: { sessionId } },
-            {
-              $project: {
-                c: {
-                  $size: {
-                    $filter: {
-                      input: "$events",
-                      cond: { $eq: ["$$this.type", "page_view"] },
-                    },
-                  },
-                },
-              },
-            },
-          ])
-            .then(
-              (r) =>
-                (r[0]?.c || 0) +
-                events.filter((e) => e.type === "page_view").length,
-            )
-            .catch(() => 0),
+          lastSeen: new Date(), // ← CRITICAL: This must be updated on EVERY event
+          ip: ip,
         },
       },
       { upsert: true, new: true },
     );
 
+    console.log(
+      `✅ [TRACKER] Updated session ${sessionId.slice(-8)} with ${events.length} events, lastSeen: ${new Date().toISOString()}`,
+    );
+
     res.json({ success: true });
   } catch (err) {
     console.error("❌ [TRACKER] Ingest error:", err.message);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
