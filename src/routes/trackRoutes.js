@@ -6,6 +6,7 @@ const {
   getSessionDetail,
   getStats,
   linkSession,
+  getActiveVisitorCount,
 } = require("../controllers/trackController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -17,5 +18,6 @@ router.get("/sessions", protect, getSessions);
 router.get("/sessions/:sessionId", protect, getSessionDetail);
 router.get("/stats", protect, getStats);
 router.patch("/sessions/:sessionId/link", linkSession);
+router.get("/active-count", protect, getActiveVisitorCount);
 
 module.exports = router;
