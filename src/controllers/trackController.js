@@ -205,10 +205,37 @@ const linkSession = async (req, res) => {
   }
 };
 
+// Add this function to your existing trackController.js
+const getActiveVisitorCount = async (req, res) => {
+  try {
+    // Get active sessions from last 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+    const activeCount = await TrackSession.countDocuments({
+      lastSeen: { $gte: fiveMinutesAgo },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        activeCount: activeCount,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("Error getting active visitor count:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   ingestEvents,
   getSessions,
   getSessionDetail,
   getStats,
   linkSession,
+  getActiveVisitorCount,
 };
