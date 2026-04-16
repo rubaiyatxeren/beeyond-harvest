@@ -108,7 +108,7 @@ const blogSchema = new mongoose.Schema(
 
     // ── Content Settings ──────────────────────────────────────────────────────
     readingTime: { type: Number }, // in minutes, auto-calculated
-    language: { type: String, default: "bn", enum: ["bn", "en"] }, // Bengali default
+    contentLanguage: { type: String, default: "bn", enum: ["bn", "en"] }, // Bengali default
     allowComments: { type: Boolean, default: true },
 
     // ── Related Content ───────────────────────────────────────────────────────
