@@ -161,15 +161,11 @@ blogSchema.virtual("isPublished").get(function () {
 
 // ─── Pre-save Hooks ───────────────────────────────────────────────────────────
 
-/**
- * Auto-generate slug from title if not provided.
- */
-blogSchema.pre("save", function (next) {
+blogSchema.pre("save", async function () {
   if (!this.slug) {
     this.slug = generateSlug(this.title);
   }
 
-  // Auto-set publishedAt when first published
   if (
     this.isModified("status") &&
     this.status === "published" &&
@@ -178,20 +174,16 @@ blogSchema.pre("save", function (next) {
     this.publishedAt = new Date();
   }
 
-  // Auto-calculate reading time (avg 200 words/min)
   if (this.isModified("body")) {
     const wordCount = this.body.trim().split(/\s+/).length;
     this.readingTime = Math.max(1, Math.ceil(wordCount / 200));
   }
 
-  // Auto-generate excerpt from body if not provided
   if (!this.excerpt && this.body) {
-    const stripped = this.body.replace(/<[^>]+>/g, ""); // strip HTML
+    const stripped = this.body.replace(/<[^>]+>/g, "");
     this.excerpt =
       stripped.slice(0, 250).trim() + (stripped.length > 250 ? "…" : "");
   }
-
-  next();
 });
 
 // ─── Static Methods ───────────────────────────────────────────────────────────
