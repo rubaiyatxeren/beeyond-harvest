@@ -343,6 +343,18 @@ const generateSenderConfirmEmailTemplate = (transfer) => {
 const initiateTransfer = async (req, res) => {
   try {
     console.log("📤 [TRANSFER] New transfer initiation");
+    console.log("📁 req.files:", req.files);
+    console.log("📦 req.body:", req.body);
+    console.log("🔑 Headers:", req.headers["content-type"]);
+
+    // Check if files exist
+    if (!req.files || req.files.length === 0) {
+      console.error("❌ No files in request");
+      return res.status(400).json({
+        success: false,
+        message: "No files uploaded",
+      });
+    }
 
     const { senderEmail, senderName, receiverEmail, receiverName, message } =
       req.body;
@@ -477,6 +489,7 @@ const initiateTransfer = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ [TRANSFER] Initiate error:", error.message);
+    console.error("❌ Error stack:", error.stack);
     res
       .status(500)
       .json({ success: false, message: "Failed to initiate transfer" });
