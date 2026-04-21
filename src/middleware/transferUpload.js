@@ -70,6 +70,38 @@ const fileFilter = (req, file, cb) => {
 };
 
 // ── Storage engine selection ───────────────────────────────────────────────────
+function _diskStorage() {
+  // Use /tmp directory on Render (writable)
+  const uploadDir =
+    process.env.NODE_ENV === "production"
+      ? "/tmp/uploads/transfers" // Render's writable temp directory
+      : path.join(__dirname, "../uploads/transfers");
+
+  console.log("💾 [UPLOAD] Using disk storage at:", uploadDir);
+
+  // Ensure directory exists
+  if (!fs.existsSync(uploadDir)) {
+    try {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      console.log("✅ [UPLOAD] Created upload directory:", uploadDir);
+    } catch (err) {
+      console.error("❌ [UPLOAD] Failed to create directory:", err);
+      throw new Error(`Cannot create upload directory: ${err.message}`);
+    }
+  }
+
+  return multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      const uniqueName = `${Date.now()}-${crypto.randomBytes(16).toString("hex")}${ext}`;
+      cb(null, uniqueName);
+    },
+  });
+}
+
 let storage;
 
 if (process.env.CLOUDINARY_CLOUD_NAME) {
@@ -86,43 +118,28 @@ if (process.env.CLOUDINARY_CLOUD_NAME) {
         return {
           folder: "beeharvest/transfers",
           public_id: uniqueName,
-          resource_type: "raw", // allows any file type
+          resource_type: "auto", // Changed from "raw" to "auto" for better compatibility
           use_filename: false,
           unique_filename: true,
           overwrite: false,
         };
       },
     });
-    console.log("🌤️  [TRANSFER UPLOAD] Using Cloudinary storage");
+    console.log("🌤️ [TRANSFER UPLOAD] Using Cloudinary storage");
   } catch (err) {
     console.warn(
-      "⚠️  multer-storage-cloudinary not installed — falling back to disk storage",
+      "⚠️ [TRANSFER UPLOAD] Cloudinary storage error, falling back to disk storage:",
+      err.message,
     );
-    storage = _diskStorage();
+    storage = _diskStorage(); // FIXED: Now calling the function
   }
 } else {
-  storage = _diskStorage();
-}
-
-function _diskStorage() {
-  const uploadDir = path.join(__dirname, "../uploads/transfers");
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  }
-  console.log("💾 [TRANSFER UPLOAD] Using local disk storage →", uploadDir);
-
-  return multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname);
-      const uniqueName = `${crypto.randomBytes(16).toString("hex")}${ext}`;
-      cb(null, uniqueName);
-    },
-  });
+  console.log("💾 [TRANSFER UPLOAD] No Cloudinary config, using disk storage");
+  storage = _diskStorage(); // FIXED: Now calling the function
 }
 
 const transferUpload = multer({
-  storage,
+  storage: storage,
   fileFilter,
   limits: {
     fileSize: MAX_FILE_SIZE_BYTES,
