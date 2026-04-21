@@ -1066,6 +1066,11 @@ const updateOrderStatus = async (req, res) => {
     }
 
     await order.save();
+
+    if (newStatus === "delivered") {
+      const { sendReviewRequestEmails } = require("./reviewController");
+      setImmediate(() => sendReviewRequestEmails(order));
+    }
     console.log(
       `✅ [STATUS] ${order.orderNumber}: ${oldStatus} → ${newStatus}`,
     );
