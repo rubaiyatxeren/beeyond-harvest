@@ -137,7 +137,7 @@ const generateReceiverEmailTemplate = (transfer) => {
     month: "long",
     day: "numeric",
   });
-  const downloadUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/transfer/${transfer.transferId}`;
+  const downloadUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}?transfer=${transfer.transferId}`;
 
   const fileRows = transfer.files
     .map(
