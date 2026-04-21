@@ -98,7 +98,8 @@ const transferSchema = new mongoose.Schema(
 );
 
 // ── Pre-save: generate transferId ─────────────────────────────────────────────
-transferSchema.pre("save", function (next) {
+transferSchema.pre("save", async function () {
+  // Generate transferId if missing
   if (!this.transferId) {
     const date = new Date();
     const year = date.getFullYear();
@@ -115,8 +116,6 @@ transferSchema.pre("save", function (next) {
       0,
     );
   }
-
-  next();
 });
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
