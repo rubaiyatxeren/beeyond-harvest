@@ -20,6 +20,7 @@ const fraudRoutes = require("./routes/fraudRoutes");
 const profitRoutes = require("./routes/profitRoutes");
 const trackRoutes = require("./routes/trackRoutes");
 const blogRoutes = require("./routes/blogRoutes");
+const transferRoutes = require("./routes/transferRoutes");
 
 const app = express();
 
@@ -167,6 +168,7 @@ app.use("/api/fraud", fraudRoutes);
 app.use("/api/profit", profitRoutes);
 app.use("/api/track", trackRoutes);
 app.use("/api/blogs", blogRoutes);
+app.use("/api/transfers", transferRoutes);
 
 // ✅ DEBUG ROUTE LIST
 console.log("✅ Routes registered:");
