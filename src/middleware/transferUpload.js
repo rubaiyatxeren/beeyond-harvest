@@ -119,6 +119,7 @@ if (process.env.CLOUDINARY_CLOUD_NAME) {
           folder: "beeharvest/transfers",
           public_id: uniqueName,
           resource_type: "auto", // Changed from "raw" to "auto" for better compatibility
+          access_mode: "public",
           use_filename: false,
           unique_filename: true,
           overwrite: false,
