@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/authMiddleware");
+const uploadComplaint = require("../middleware/uploadComplaint"); // Add this line
 const {
   createComplaint,
   getComplaints,
@@ -24,9 +25,9 @@ const {
 // PUBLIC ROUTES (customer-facing)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Submit a new complaint
+// Submit a new complaint with file attachments
 // POST /api/complaints
-router.post("/", createComplaint);
+router.post("/", uploadComplaint.array("attachments", 5), createComplaint); // ← CHANGE THIS LINE
 
 // Track a complaint by ticket number + email verification
 // GET /api/complaints/track/:ticketNumber?email=customer@email.com
