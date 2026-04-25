@@ -22,6 +22,7 @@ const trackRoutes = require("./routes/trackRoutes");
 const blogRoutes = require("./routes/blogRoutes");
 const transferRoutes = require("./routes/transferRoutes");
 const reviewRoutes = require("./routes/reviewRoutes");
+const complaintRoutes = require("./routes/complaintRoutes");
 
 const app = express();
 
@@ -171,6 +172,7 @@ app.use("/api/track", trackRoutes);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/transfers", transferRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("/api/complaints", complaintRoutes);
 
 // ✅ DEBUG ROUTE LIST
 console.log("✅ Routes registered:");
