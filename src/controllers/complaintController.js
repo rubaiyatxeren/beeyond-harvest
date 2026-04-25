@@ -1,5 +1,6 @@
 const Complaint = require("../models/Complaint");
 const Order = require("../models/Order");
+const uploadComplaint = require("../middleware/uploadComplaint");
 const { sendEmail } = require("../utils/emailService");
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -478,7 +479,27 @@ const createComplaint = async (req, res) => {
   try {
     console.log("📋 [COMPLAINT] New complaint received");
 
-    const { customer, category, subject, description, orderNumber } = req.body;
+    // Parse data (handle both FormData and JSON)
+    let customer, category, subject, description, orderNumber;
+
+    if (req.files || req.body.customer) {
+      // Handle FormData with files
+      customer =
+        typeof req.body.customer === "string"
+          ? JSON.parse(req.body.customer)
+          : req.body.customer;
+      category = req.body.category;
+      subject = req.body.subject;
+      description = req.body.description;
+      orderNumber = req.body.orderNumber;
+    } else {
+      // Handle JSON
+      customer = req.body.customer;
+      category = req.body.category;
+      subject = req.body.subject;
+      description = req.body.description;
+      orderNumber = req.body.orderNumber;
+    }
 
     // ── Input validation ─────────────────────────────────────────────────────
     if (!customer?.name || !customer?.email) {
@@ -545,6 +566,20 @@ const createComplaint = async (req, res) => {
       verifiedOrderNumber = order.orderNumber;
     }
 
+    // ── Process attachments ──────────────────────────────────────────────────
+    const attachments = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        attachments.push({
+          url: file.path,
+          publicId: file.filename,
+          fileName: file.originalname,
+          fileType: file.mimetype,
+          uploadedAt: new Date(),
+        });
+      }
+    }
+
     // ── Create complaint ─────────────────────────────────────────────────────
     const complaint = await Complaint.create({
       customer: {
@@ -559,10 +594,11 @@ const createComplaint = async (req, res) => {
       orderId,
       ipAddress,
       userAgent: req.headers["user-agent"] || "",
+      attachments: attachments, // Add attachments to the complaint
     });
 
     console.log(
-      `✅ [COMPLAINT] Created: ${complaint.ticketNumber} | priority: ${complaint.priority}`,
+      `✅ [COMPLAINT] Created: ${complaint.ticketNumber} | priority: ${complaint.priority} | attachments: ${attachments.length}`,
     );
 
     // ── Send emails in background ────────────────────────────────────────────
@@ -602,6 +638,7 @@ const createComplaint = async (req, res) => {
         status: complaint.status,
         category: complaint.category,
         createdAt: complaint.createdAt,
+        attachmentsCount: attachments.length,
       },
     });
   } catch (error) {
@@ -609,6 +646,12 @@ const createComplaint = async (req, res) => {
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((e) => e.message);
       return res.status(400).json({ success: false, message: messages[0] });
+    }
+    if (error.message === "Only images are allowed") {
+      return res.status(400).json({
+        success: false,
+        message: "শুধুমাত্র ছবি (JPG, PNG, GIF) বা PDF ফাইল সমর্থিত",
+      });
     }
     res.status(500).json({
       success: false,
