@@ -188,9 +188,9 @@ const generateComplaintConfirmationEmail = (complaint) => {
     <!-- CTA -->
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
       <tr><td align="center">
-        <a href="${shopUrl}?ticket=${complaint.ticketNumber}" style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:800;">
-          📋 টিকেট ট্র্যাক করুন
-        </a>
+        <a href="${shopUrl}?ticket=${complaint.ticketNumber}&email=${encodeURIComponent(complaint.customer.email)}" style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:800;">
+  📋 টিকেট ট্র্যাক করুন
+</a>
       </td></tr>
     </table>
   </td></tr>
@@ -290,9 +290,9 @@ const generateStatusUpdateEmail = (complaint, extraMessage = "") => {
     ${holdBlock}
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
       <tr><td align="center">
-        <a href="${shopUrl}?ticket=${complaint.ticketNumber}" style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:14px 36px;border-radius:50px;font-size:14px;font-weight:800;">
-          📋 টিকেট দেখুন
-        </a>
+        <a href="${shopUrl}?ticket=${complaint.ticketNumber}&email=${encodeURIComponent(complaint.customer.email)}" style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:14px 36px;border-radius:50px;font-size:14px;font-weight:800;">
+  📋 টিকেট দেখুন
+</a>
       </td></tr>
     </table>
   </td></tr>
@@ -334,7 +334,7 @@ const generateReplyEmail = (complaint, replyMessage) => {
     </div>
     <table width="100%" cellpadding="0" cellspacing="0">
       <tr><td align="center">
-        <a href="${shopUrl}?ticket=${complaint.ticketNumber}" style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:14px 36px;border-radius:50px;font-size:14px;font-weight:800;">
+        <a href="${shopUrl}?ticket=${complaint.ticketNumber}&email=${encodeURIComponent(complaint.customer.email)}" style="display:inline-block;background:linear-gradient(135deg,#F5A623,#C47F11);color:#0D1B3E;text-decoration:none;padding:14px 36px;border-radius:50px;font-size:14px;font-weight:800;">
           💬 উত্তর দিন
         </a>
       </td></tr>
