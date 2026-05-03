@@ -24,7 +24,6 @@ const transferRoutes = require("./routes/transferRoutes");
 const reviewRoutes = require("./routes/reviewRoutes");
 const complaintRoutes = require("./routes/complaintRoutes");
 const financeRoutes = require("./routes/financeRoutes");
- 
 
 const app = express();
 
@@ -62,14 +61,28 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
+      // ✅ Allow server-to-server or curl/Postman (no origin)
       if (!origin) return callback(null, true);
-      if (process.env.NODE_ENV === "development") return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      console.warn("⚠️ Blocked CORS origin:", origin);
-      return callback(null, true); // allow but log
+
+      // ✅ Allow everything in development
+      if (process.env.NODE_ENV === "development") {
+        return callback(null, true);
+      }
+
+      // ✅ Allow only whitelisted origins in production
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // ❌ Block everything else
+      console.warn("❌ Blocked CORS origin:", origin);
+      return callback(new Error("Not allowed by CORS"));
     },
+
     credentials: true,
+
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -77,8 +90,10 @@ app.use(
       "Accept",
       "Origin",
     ],
+
     exposedHeaders: ["Authorization"],
-    maxAge: 86400,
+
+    maxAge: 86400, // cache preflight for 24h
   }),
 );
 
