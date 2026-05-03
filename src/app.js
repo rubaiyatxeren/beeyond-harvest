@@ -38,8 +38,7 @@ app.use(
   }),
 );
 
-// ✅ CORS CONFIG
-const allowedOrigins = [
+const allowedOrigins = new Set([
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5500",
@@ -56,46 +55,50 @@ const allowedOrigins = [
   "http://192.168.56.1:5501",
   "https://admin-beeharvest.vercel.app",
   "https://beeharvest.vercel.app",
-];
+  "https://beeyondharvest.vercel.app",
+]);
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // ✅ Allow server-to-server or curl/Postman (no origin)
-      if (!origin) return callback(null, true);
+const corsOptions = {
+  origin(origin, callback) {
+    // no origin = server-to-server, Postman, curl — allow
+    if (!origin) return callback(null, true);
 
-      // ✅ Allow everything in development
-      if (process.env.NODE_ENV === "development") {
-        return callback(null, true);
-      }
+    // dev = allow all, no lookup needed
+    if (process.env.NODE_ENV === "development") return callback(null, true);
 
-      // ✅ Allow only whitelisted origins in production
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+    // O(1) Set lookup instead of O(n) array scan
+    if (allowedOrigins.has(origin)) return callback(null, true);
 
-      // ❌ Block everything else
-      console.warn("❌ Blocked CORS origin:", origin);
-      return callback(new Error("Not allowed by CORS"));
-    },
+    // block & log with timestamp + origin for audit trail
+    console.warn(
+      `[CORS] ${new Date().toISOString()} blocked origin: ${origin}`,
+    );
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+  ],
+  exposedHeaders: ["Authorization"],
+  maxAge: 86400,
+};
 
-    credentials: true,
+app.use(cors(corsOptions));
 
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "X-Requested-With",
-      "Accept",
-      "Origin",
-    ],
-
-    exposedHeaders: ["Authorization"],
-
-    maxAge: 86400, // cache preflight for 24h
-  }),
-);
+// clean error response for blocked origins
+app.use((err, req, res, next) => {
+  if (err.message === "Not allowed by CORS") {
+    return res
+      .status(403)
+      .json({ success: false, message: "Origin not allowed" });
+  }
+  next(err);
+});
 
 // ✅ BODY PARSER
 app.use(express.json({ limit: "50mb" }));
